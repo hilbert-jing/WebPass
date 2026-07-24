@@ -1,0 +1,54 @@
+@page "/subnets"
+@model WebPass.Web.Pages.Subnets.IndexModel
+@{
+    ViewData["Title"] = "Subnets";
+}
+
+<h1>Subnets</h1>
+<div asp-validation-summary="ModelOnly"></div>
+
+<form method="post" asp-page-handler="Create">
+    <label asp-for="Input.Name"></label><input asp-for="Input.Name" />
+    <label asp-for="Input.Cidr"></label><input asp-for="Input.Cidr" />
+    <label asp-for="Input.Location"></label><input asp-for="Input.Location" />
+    <label asp-for="Input.Notes"></label><textarea asp-for="Input.Notes"></textarea>
+    <label asp-for="Input.IsEnabled"></label><input asp-for="Input.IsEnabled" />
+    <button type="submit" formaction="?handler=Preview">Preview range</button>
+    <button type="submit">Create subnet</button>
+</form>
+
+<table>
+    <thead><tr><th>Name</th><th>CIDR</th><th>Location</th><th>Enabled</th><th>Actions</th></tr></thead>
+    <tbody>
+    @foreach (var subnet in Model.Subnets)
+    {
+        <tr>
+            <td>@subnet.Name</td><td>@subnet.Cidr</td><td>@subnet.Location</td><td>@subnet.IsEnabled</td>
+            <td>
+                <form method="post" asp-page-handler="Edit">
+                    <input type="hidden" name="id" value="@subnet.Id" />
+                    <input type="hidden" name="rowVersion" value="@Convert.ToBase64String(subnet.RowVersion)" />
+                    <label>Name <input name="Input.Name" value="@subnet.Name" /></label>
+                    <label>CIDR <input name="Input.Cidr" value="@subnet.Cidr" /></label>
+                    <label>Location <input name="Input.Location" value="@subnet.Location" /></label>
+                    <label>Notes <input name="Input.Notes" value="@subnet.Notes" /></label>
+                    <input type="hidden" name="Input.IsEnabled" value="false" />
+                    <label>Enabled <input type="checkbox" name="Input.IsEnabled" value="true" checked="@subnet.IsEnabled" /></label>
+                    <button type="submit">Save edit</button>
+                </form>
+                <form method="post" asp-page-handler="SetEnabled">
+                    <input type="hidden" name="id" value="@subnet.Id" />
+                    <input type="hidden" name="rowVersion" value="@Convert.ToBase64String(subnet.RowVersion)" />
+                    <input type="hidden" name="isEnabled" value="@(!subnet.IsEnabled)" />
+                    <button type="submit">@(subnet.IsEnabled ? "Disable" : "Enable")</button>
+                </form>
+                <form method="post" asp-page-handler="Delete">
+                    <input type="hidden" name="id" value="@subnet.Id" />
+                    <input type="hidden" name="rowVersion" value="@Convert.ToBase64String(subnet.RowVersion)" />
+                    <button type="submit">Delete</button>
+                </form>
+            </td>
+        </tr>
+    }
+    </tbody>
+</table>

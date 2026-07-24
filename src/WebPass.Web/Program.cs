@@ -1,4 +1,8 @@
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
+using WebPass.Web.Application.Authorization;
+using WebPass.Web.Application.Subnets;
+using WebPass.Web.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -12,6 +16,15 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorPages();
 builder.Services.AddAntiforgery();
 builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    foreach (var code in PermissionCode.OrdinaryUserCodes)
+    {
+        options.AddPolicy(code, policy => policy.RequireAuthenticatedUser().AddRequirements(new PermissionRequirement(code)));
+    }
+
+    options.AddPolicy(PermissionCode.AdministratorPolicy, policy => policy.RequireAuthenticatedUser().AddRequirements(new AdministratorRequirement()));
+});
 builder.Services
     .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
@@ -30,6 +43,9 @@ builder.Services.AddSingleton<IValidateOptions<WebPassOptions>, WebPassOptionsVa
 builder.Services.AddScoped<IPasswordHasher, Argon2PasswordHasher>();
 builder.Services.AddScoped<AuditWriter>();
 builder.Services.AddScoped<LoginService>();
+builder.Services.AddScoped<PermissionAuthorizationHandler>();
+builder.Services.AddScoped<IAuthorizationHandler>(services => services.GetRequiredService<PermissionAuthorizationHandler>());
+builder.Services.AddScoped<SubnetService>();
 
 var app = builder.Build();
 

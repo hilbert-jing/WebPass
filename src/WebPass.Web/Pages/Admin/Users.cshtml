@@ -1,0 +1,38 @@
+@page "/admin/users"
+@model WebPass.Web.Pages.Admin.UsersModel
+@{
+    ViewData["Title"] = "Users";
+}
+
+<h1>User and permission management</h1>
+<table>
+    <thead><tr><th>User</th><th>Administrator</th><th>Enabled</th><th>Permissions</th><th>Actions</th></tr></thead>
+    <tbody>
+    @foreach (var user in Model.Users)
+    {
+        <tr>
+            <td>@user.Username</td><td>@user.IsAdministrator</td><td>@user.IsEnabled</td>
+            <td>@string.Join(", ", user.Permissions.Select(x => x.PermissionCode))</td>
+            <td>
+                @if (!user.IsAdministrator)
+                {
+                    <form method="post" asp-page-handler="SetEnabled">
+                        <input type="hidden" name="userId" value="@user.Id" />
+                        <input type="hidden" name="rowVersion" value="@Convert.ToBase64String(user.RowVersion)" />
+                        <input type="hidden" name="isEnabled" value="@(!user.IsEnabled)" />
+                        <button type="submit">@(user.IsEnabled ? "Disable" : "Enable")</button>
+                    </form>
+                    <form method="post" asp-page-handler="ReplacePermissions">
+                        <input type="hidden" name="userId" value="@user.Id" />
+                        @foreach (var code in Model.GrantablePermissions)
+                        {
+                            <label><input type="checkbox" name="selectedPermissions" value="@code" checked="@user.Permissions.Any(x => x.PermissionCode == code)" />@code</label>
+                        }
+                        <button type="submit">Save permissions</button>
+                    </form>
+                }
+            </td>
+        </tr>
+    }
+    </tbody>
+</table>
