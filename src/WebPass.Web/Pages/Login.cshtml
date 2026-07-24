@@ -1,0 +1,15 @@
+@page "/login"
+@model WebPass.Web.Pages.LoginModel
+@{
+    ViewData["Title"] = "Login";
+}
+
+<h1>WebPass login</h1>
+<form method="post">
+    <div asp-validation-summary="ModelOnly"></div>
+    <label asp-for="Input.Username"></label>
+    <input asp-for="Input.Username" autocomplete="username" />
+    <label asp-for="Input.Password"></label>
+    <input asp-for="Input.Password" type="password" autocomplete="current-password" />
+    <button type="submit">Sign in</button>
+</form>
