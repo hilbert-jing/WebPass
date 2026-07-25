@@ -21,7 +21,7 @@ public sealed class PingService(
     IOptions<WebPassOptions> options)
 {
     private static readonly ConcurrentDictionary<int, SemaphoreSlim> ConcurrencyGates = new();
-    private static readonly ConcurrentDictionary<Guid, Queue<DateTimeOffset>> UserExecutions = new();
+    private static readonly ConcurrentDictionary<Guid, RateWindow> UserExecutions = new();
     private static int _rateCleanupTick;
 
     public async Task<PingResult> ExecuteAsync(Guid assetId, Guid actorUserId, CancellationToken ct)
@@ -121,16 +121,24 @@ public sealed class PingService(
 
     private void ConsumeRateAllowance(Guid actorUserId)
     {
-        CleanupExpiredRateWindows(DateTimeOffset.UtcNow);
-        var executions = UserExecutions.GetOrAdd(actorUserId, static _ => new Queue<DateTimeOffset>());
         var now = DateTimeOffset.UtcNow;
-        lock (executions)
+        CleanupExpiredRateWindows(now);
+        while (true)
         {
-            while (executions.Count > 0 && now - executions.Peek() >= TimeSpan.FromMinutes(1))
-                executions.Dequeue();
-            if (executions.Count >= options.Value.PingPerUserPerMinute)
-                throw new InvalidOperationException("Ping rate limit exceeded.");
-            executions.Enqueue(now);
+            var window = UserExecutions.GetOrAdd(actorUserId, static _ => new RateWindow());
+            lock (window.Gate)
+            {
+                // Cleanup may remove an empty window between GetOrAdd and this lock.
+                // Revalidate ownership while holding the same lock before consuming quota.
+                if (!UserExecutions.TryGetValue(actorUserId, out var current) || !ReferenceEquals(window, current))
+                    continue;
+
+                PruneExpired(window.Executions, now);
+                if (window.Executions.Count >= options.Value.PingPerUserPerMinute)
+                    throw new InvalidOperationException("Ping rate limit exceeded.");
+                window.Executions.Enqueue(now);
+                return;
+            }
         }
     }
 
@@ -139,15 +147,27 @@ public sealed class PingService(
         if (Interlocked.Increment(ref _rateCleanupTick) % 64 != 0) return;
         foreach (var pair in UserExecutions)
         {
-            lock (pair.Value)
+            lock (pair.Value.Gate)
             {
-                while (pair.Value.Count > 0 && now - pair.Value.Peek() >= TimeSpan.FromMinutes(1))
-                    pair.Value.Dequeue();
-                if (pair.Value.Count == 0)
-                    UserExecutions.TryRemove(new KeyValuePair<Guid, Queue<DateTimeOffset>>(pair.Key, pair.Value));
+                PruneExpired(pair.Value.Executions, now);
+                if (pair.Value.Executions.Count == 0)
+                    UserExecutions.TryRemove(new KeyValuePair<Guid, RateWindow>(pair.Key, pair.Value));
             }
         }
     }
+
+    private static void PruneExpired(Queue<DateTimeOffset> executions, DateTimeOffset now)
+    {
+        while (executions.Count > 0 && now - executions.Peek() >= TimeSpan.FromMinutes(1))
+            executions.Dequeue();
+    }
+
+    private sealed class RateWindow
+    {
+        public object Gate { get; } = new();
+        public Queue<DateTimeOffset> Executions { get; } = new();
+    }
+
     private static string NormalizeOutcome(string outcome) => outcome switch
     {
         "Success" => "Success",

@@ -60,6 +60,59 @@ public sealed class SqlServerAssetTests
         }
     }
 
+    [Fact]
+    public async Task Sql_direct_context_enforces_filtered_unique_index_and_allows_reuse_after_archive()
+    {
+        await using var db = await NewSqlDatabaseAsync();
+        try
+        {
+            var (service, actor) = await NewServiceAsync(db);
+            await AddSubnetAsync(db);
+            var first = await service.CreateAsync(Input("10.0.0.9", "First"), actor.Id, default);
+            var subnet = await db.Subnets.SingleAsync();
+
+            db.ServerAssets.Add(DirectAsset(subnet.Id, "10.0.0.9", "Duplicate"));
+            await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+
+            db.ChangeTracker.Clear();
+            var archived = await db.ServerAssets.SingleAsync(x => x.Id == first.Id);
+            archived.IsArchived = true;
+            archived.ArchivedAt = DateTimeOffset.UtcNow;
+            archived.ArchivedBy = actor.Id;
+            await db.SaveChangesAsync();
+
+            db.ServerAssets.Add(DirectAsset(subnet.Id, "10.0.0.9", "Replacement"));
+            await db.SaveChangesAsync();
+            Assert.Equal(2, await db.ServerAssets.CountAsync());
+        }
+        finally
+        {
+            await db.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Sql_audit_failure_rolls_back_the_asset_command_transaction()
+    {
+        await using var db = await NewSqlDatabaseAsync();
+        try
+        {
+            var (service, actor) = await NewServiceAsync(db);
+            await AddSubnetAsync(db);
+            await db.Database.ExecuteSqlRawAsync(
+                "CREATE TRIGGER [TR_AuditLogs_Reject] ON [AuditLogs] INSTEAD OF INSERT AS BEGIN THROW 50000, 'Audit rejected', 1; END");
+
+            await Assert.ThrowsAsync<DbUpdateException>(() => service.CreateAsync(Input("10.0.0.9", "Will Roll Back"), actor.Id, default));
+
+            db.ChangeTracker.Clear();
+            Assert.Empty(await db.ServerAssets.ToListAsync());
+        }
+        finally
+        {
+            await db.Database.EnsureDeletedAsync();
+        }
+    }
+
     private static async Task<WebPassDbContext> NewSqlDatabaseAsync()
     {
         var name = "WebPassTask4_" + Guid.NewGuid().ToString("N");
@@ -85,4 +138,13 @@ public sealed class SqlServerAssetTests
 
     private static ServerAssetInput Input(string ip, string location) =>
         new(ip, location, WebPass.Web.Domain.Enums.AliveStatus.Unknown, "server", "System", null, null, null);
+    private static ServerAsset DirectAsset(Guid subnetId, string ip, string location) => new()
+    {
+        SubnetId = subnetId,
+        BusinessIp = ip,
+        BusinessIpNumber = 167772169,
+        Location = location,
+        ComputerName = "server",
+        SystemName = "System",
+    };
 }

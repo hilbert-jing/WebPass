@@ -361,6 +361,52 @@ public sealed class AssetAndPingTests
         Assert.Equal(0, page.TotalCount);
         Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(2));
     }
+    [Fact]
+    public async Task Unknown_status_pool_includes_free_rows_with_long_total_and_paging()
+    {
+        await using var db = NewDatabase();
+        var actor = await AddUserAsync(db, PermissionCode.AssetCreate);
+        var assets = NewAssetService(db);
+        var subnet = await AddEnabledSubnetAsync(db, "10.0.0.0/29");
+        await assets.CreateAsync(Input("10.0.0.2", status: AliveStatus.Fault), actor.Id, default);
+        var unknown = await assets.CreateAsync(Input("10.0.0.3", status: AliveStatus.Unknown), actor.Id, default);
+
+        var page = await assets.ListAsync(new ServerListQuery(SubnetId: subnet.Id, PoolMode: true, Status: AliveStatus.Unknown, Skip: 0, Take: 6), default);
+
+        Assert.Equal(5, page.TotalCount);
+        Assert.Equal(new[] { "10.0.0.1", "10.0.0.3", "10.0.0.4", "10.0.0.5", "10.0.0.6" }, page.Items.Select(x => x.BusinessIp));
+        Assert.Equal(unknown.Id, page.Items.Single(x => x.BusinessIp == "10.0.0.3").AssetId);
+    }
+
+    [Fact]
+    public async Task Broad_ip_search_pool_returns_free_rows_across_selected_cidrs_without_scanning_zero_cidr()
+    {
+        await using var db = NewDatabase();
+        await AddEnabledSubnetAsync(db, "10.0.0.0/29");
+        await AddEnabledSubnetAsync(db, "10.0.1.0/29");
+
+        var page = await NewAssetService(db).ListAsync(new ServerListQuery(PoolMode: true, Search: "10.0.1.", Skip: 1, Take: 3), default);
+
+        Assert.Equal(6, page.TotalCount);
+        Assert.Equal(new[] { "10.0.1.2", "10.0.1.3", "10.0.1.4" }, page.Items.Select(x => x.BusinessIp));
+        Assert.All(page.Items, x => Assert.Null(x.AssetId));
+    }
+
+    [Fact]
+    public async Task Filtered_pool_include_archived_prefers_active_registration_over_archived_match()
+    {
+        await using var db = NewDatabase();
+        var actor = await AddUserAsync(db, PermissionCode.AssetCreate, PermissionCode.AssetArchive);
+        var assets = NewAssetService(db);
+        var subnet = await AddEnabledSubnetAsync(db, "10.0.0.0/29");
+        var archived = await assets.CreateAsync(Input("10.0.0.2", status: AliveStatus.Unknown), actor.Id, default);
+        await assets.ArchiveAsync(archived.Id, archived.RowVersion, actor.Id, default);
+        var active = await assets.CreateAsync(Input("10.0.0.2", status: AliveStatus.Fault), actor.Id, default);
+
+        var page = await assets.ListAsync(new ServerListQuery(SubnetId: subnet.Id, PoolMode: true, IncludeArchived: true, Status: AliveStatus.Unknown), default);
+
+        Assert.DoesNotContain(page.Items, x => x.BusinessIp == active.BusinessIp);
+    }
     private static ServerAssetInput Input(string ip, string location = "HQ", AliveStatus status = AliveStatus.Unknown) =>
         new(ip, location, status, "server", "WebPass", null, null, "normal metadata");
 

@@ -142,6 +142,7 @@ public sealed class ServerAssetService(
         CancellationToken ct)
     {
         var search = query.Search?.Trim();
+        var primary = await GetPrimaryAssetsAsync(selected, query.IncludeArchived, ct);
         if (TryParseCanonicalIpv4(search, out var exactAddress))
         {
             var entry = selected.SingleOrDefault(x => x.Cidr.ContainsUsable(exactAddress));
@@ -150,18 +151,85 @@ public sealed class ServerAssetService(
             return new ServerListPage(exactItems.Skip(query.Skip).Take(query.Take).ToList(), exactItems.Count, true, query.Skip, query.Take);
         }
 
-        var subnetIds = selected.Select(x => x.Subnet.Id).ToArray();
-        var assets = db.ServerAssets.AsNoTracking().Where(x => subnetIds.Contains(x.SubnetId));
-        if (!query.IncludeArchived) assets = assets.Where(x => !x.IsArchived);
-        if (query.Status is { } status) assets = assets.Where(x => x.AliveStatus == status);
-        if (!string.IsNullOrWhiteSpace(search))
-            assets = assets.Where(x => x.BusinessIp.Contains(search) || x.Location.Contains(search) ||
-                x.ComputerName.Contains(search) || x.SystemName.Contains(search));
+        if (query.Status == Domain.Enums.AliveStatus.Unknown || TryGetIpPrefixRange(search, out _, out _))
+            return await ListGeneratedFilteredPoolAsync(query, selected, primary, search, ct);
 
-        var total = await assets.LongCountAsync(ct);
-        var items = await assets.OrderBy(x => x.BusinessIpNumber).Skip(query.Skip).Take(query.Take)
-            .Select(x => ToItem(x)).ToListAsync(ct);
+        var items = primary.Where(x => (query.Status is null || x.AliveStatus == query.Status) &&
+                (search is null || x.BusinessIp.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                 x.Location.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                 x.ComputerName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                 x.SystemName.Contains(search, StringComparison.OrdinalIgnoreCase)))
+            .OrderBy(x => x.BusinessIpNumber).ToList();
+        return new ServerListPage(items.Skip(query.Skip).Take(query.Take).Select(ToItem).ToList(), items.Count, true, query.Skip, query.Take);
+    }
+
+    private async Task<ServerListPage> ListGeneratedFilteredPoolAsync(
+        ServerListQuery query,
+        IReadOnlyCollection<(Subnet Subnet, Ipv4Cidr Cidr)> selected,
+        IReadOnlyCollection<ServerAsset> primary,
+        string? search,
+        CancellationToken ct)
+    {
+        var hasRange = TryGetIpPrefixRange(search, out var rangeStart, out var rangeEnd);
+        long total = 0;
+        var items = new List<ServerListItem>(query.Take);
+        foreach (var entry in selected)
+        {
+            var network = ToNumber(entry.Cidr.NetworkAddress) + 1;
+            var broadcast = ToNumber(entry.Cidr.BroadcastAddress) - 1;
+            var start = hasRange ? Math.Max(network, rangeStart) : network;
+            var end = hasRange ? Math.Min(broadcast, rangeEnd) : broadcast;
+            if (start > end) continue;
+
+            var blocked = primary.Where(x => x.SubnetId == entry.Subnet.Id && x.BusinessIpNumber >= start && x.BusinessIpNumber <= end &&
+                    query.Status is { } status && x.AliveStatus != status)
+                .Select(x => x.BusinessIpNumber).Distinct().OrderBy(x => x).ToList();
+            var cursor = start;
+            foreach (var block in blocked.Append(end + 1))
+            {
+                if (cursor < block)
+                {
+                    var length = block - cursor;
+                    if (total + length > query.Skip && items.Count < query.Take)
+                    {
+                        var localSkip = Math.Max(0L, query.Skip - total);
+                        var take = (int)Math.Min((long)query.Take - items.Count, length - localSkip);
+                        var offset = cursor - network + localSkip;
+                        items.AddRange(await BuildPoolItemsAsync(entry.Subnet, entry.Cidr.EnumerateUsableAddresses(offset, take).ToArray(), query, ct));
+                    }
+                    total += length;
+                }
+                cursor = block + 1;
+            }
+        }
         return new ServerListPage(items, total, true, query.Skip, query.Take);
+    }
+
+    private async Task<IReadOnlyCollection<ServerAsset>> GetPrimaryAssetsAsync(
+        IReadOnlyCollection<(Subnet Subnet, Ipv4Cidr Cidr)> selected,
+        bool includeArchived,
+        CancellationToken ct)
+    {
+        var subnetIds = selected.Select(x => x.Subnet.Id).ToArray();
+        var all = await db.ServerAssets.AsNoTracking().Where(x => subnetIds.Contains(x.SubnetId)).ToListAsync(ct);
+        return all.GroupBy(x => new { x.SubnetId, x.BusinessIp })
+            .Select(group => group.FirstOrDefault(x => !x.IsArchived) ??
+                (includeArchived ? group.Where(x => x.IsArchived).OrderByDescending(x => x.ArchivedAt).First() : null))
+            .Where(x => x is not null).Cast<ServerAsset>().ToList();
+    }
+
+    private static bool TryGetIpPrefixRange(string? value, out long start, out long end)
+    {
+        start = end = 0;
+        if (string.IsNullOrWhiteSpace(value) || value.Any(x => !(char.IsDigit(x) || x == '.'))) return false;
+        var parts = value.Split('.', StringSplitOptions.None).Where(x => x.Length > 0).ToArray();
+        if (parts.Length is < 1 or > 4 || parts.Any(x => !byte.TryParse(x, out _))) return false;
+        var bytes = new byte[4];
+        for (var index = 0; index < parts.Length; index++) bytes[index] = byte.Parse(parts[index]);
+        start = ((long)bytes[0] << 24) | ((long)bytes[1] << 16) | ((long)bytes[2] << 8) | bytes[3];
+        for (var index = parts.Length; index < 4; index++) bytes[index] = byte.MaxValue;
+        end = ((long)bytes[0] << 24) | ((long)bytes[1] << 16) | ((long)bytes[2] << 8) | bytes[3];
+        return true;
     }
 
     private static bool TryParseCanonicalIpv4(string? value, out IPAddress address)
