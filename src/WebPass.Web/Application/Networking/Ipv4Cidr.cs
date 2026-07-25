@@ -60,10 +60,14 @@ public sealed class Ipv4Cidr
     }
 
     public IEnumerable<IPAddress> EnumerateUsableAddresses(int skip, int take)
+        => EnumerateUsableAddresses((long)skip, take);
+
+    public IEnumerable<IPAddress> EnumerateUsableAddresses(long skip, int take)
     {
         if (skip < 0) throw new ArgumentOutOfRangeException(nameof(skip));
         if (take < 0) throw new ArgumentOutOfRangeException(nameof(take));
         var usable = GetUsableAddressCount();
+        if (skip >= usable) yield break;
         var start = (long)_network + 1 + skip;
         var endExclusive = Math.Min((long)_network + 1 + usable, start + take);
         for (var address = start; address < endExclusive; address++) yield return ToAddress((uint)address);

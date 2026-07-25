@@ -22,6 +22,7 @@ public sealed class PingService(
 {
     private static readonly ConcurrentDictionary<int, SemaphoreSlim> ConcurrencyGates = new();
     private static readonly ConcurrentDictionary<Guid, Queue<DateTimeOffset>> UserExecutions = new();
+    private static int _rateCleanupTick;
 
     public async Task<PingResult> ExecuteAsync(Guid assetId, Guid actorUserId, CancellationToken ct)
     {
@@ -120,6 +121,7 @@ public sealed class PingService(
 
     private void ConsumeRateAllowance(Guid actorUserId)
     {
+        CleanupExpiredRateWindows(DateTimeOffset.UtcNow);
         var executions = UserExecutions.GetOrAdd(actorUserId, static _ => new Queue<DateTimeOffset>());
         var now = DateTimeOffset.UtcNow;
         lock (executions)
@@ -132,6 +134,20 @@ public sealed class PingService(
         }
     }
 
+    private static void CleanupExpiredRateWindows(DateTimeOffset now)
+    {
+        if (Interlocked.Increment(ref _rateCleanupTick) % 64 != 0) return;
+        foreach (var pair in UserExecutions)
+        {
+            lock (pair.Value)
+            {
+                while (pair.Value.Count > 0 && now - pair.Value.Peek() >= TimeSpan.FromMinutes(1))
+                    pair.Value.Dequeue();
+                if (pair.Value.Count == 0)
+                    UserExecutions.TryRemove(new KeyValuePair<Guid, Queue<DateTimeOffset>>(pair.Key, pair.Value));
+            }
+        }
+    }
     private static string NormalizeOutcome(string outcome) => outcome switch
     {
         "Success" => "Success",

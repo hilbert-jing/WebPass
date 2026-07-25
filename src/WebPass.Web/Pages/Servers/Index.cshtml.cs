@@ -18,7 +18,7 @@ public sealed class IndexModel(ServerAssetService assetService, PingService ping
     [BindProperty(SupportsGet = true)]
     public ServerListQuery Query { get; set; } = new();
 
-    [BindProperty]
+    [BindProperty(SupportsGet = true)]
     public ServerForm Input { get; set; } = new();
 
     public async Task OnGetAsync(CancellationToken ct) => await LoadAsync(ct);

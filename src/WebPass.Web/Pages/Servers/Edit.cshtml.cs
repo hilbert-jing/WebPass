@@ -54,8 +54,10 @@ public sealed class EditModel(WebPassDbContext db, ServerAssetService assetServi
         }
         catch (ServerAssetConcurrencyException exception)
         {
+            ModelState.Clear();
+            var result = await OnGetAsync(id, null, ct);
             ModelState.AddModelError(string.Empty, exception.Message);
-            return await OnGetAsync(id, null, ct);
+            return result;
         }
         catch (ArgumentException exception)
         {

@@ -232,6 +232,135 @@ public sealed class AssetAndPingTests
         Assert.Contains("href=\"/servers\"", html, StringComparison.Ordinal);
         Assert.DoesNotContain("href=\"/audit\"", html, StringComparison.Ordinal);
     }
+    [Fact]
+    public async Task Pool_large_cidr_returns_only_the_requested_page_without_overflow()
+    {
+        await using var db = NewDatabase();
+        await AddEnabledSubnetAsync(db, "0.0.0.0/0");
+        var service = NewAssetService(db);
+
+        var page = await service.ListAsync(new ServerListQuery(PoolMode: true, Skip: 100, Take: 50), default);
+
+        Assert.Equal(4294967294L, page.TotalCount);
+        Assert.Equal(50, page.Items.Count);
+        Assert.Equal("0.0.0.101", page.Items[0].BusinessIp);
+    }
+
+    [Fact]
+    public async Task Pool_include_archived_overlays_archived_asset_and_default_pool_leaves_it_free()
+    {
+        await using var db = NewDatabase();
+        var actor = await AddUserAsync(db, PermissionCode.AssetCreate, PermissionCode.AssetArchive);
+        var assets = NewAssetService(db);
+        var subnet = await AddEnabledSubnetAsync(db, "10.0.0.0/29");
+        var asset = await assets.CreateAsync(Input("10.0.0.2"), actor.Id, default);
+        await assets.ArchiveAsync(asset.Id, asset.RowVersion, actor.Id, default);
+
+        var defaultPool = await assets.ListAsync(new ServerListQuery(SubnetId: subnet.Id, PoolMode: true), default);
+        var archivePool = await assets.ListAsync(new ServerListQuery(SubnetId: subnet.Id, PoolMode: true, IncludeArchived: true), default);
+
+        Assert.Null(defaultPool.Items.Single(x => x.BusinessIp == "10.0.0.2").AssetId);
+        var archived = archivePool.Items.Single(x => x.BusinessIp == "10.0.0.2");
+        Assert.Equal(asset.Id, archived.AssetId);
+        Assert.True(archived.IsArchived);
+    }
+
+    [Fact]
+    public async Task Pool_free_row_links_to_prefilled_create_form_and_post_creates_asset()
+    {
+        using var factory = new ServerPageFactory(NewUser(), PermissionCode.AssetView, PermissionCode.AssetCreate);
+        factory.InitializeData();
+        await factory.AddSubnetAsync();
+        using var client = factory.CreateAuthenticatedClient();
+
+        var response = await client.GetAsync("/servers?Query.PoolMode=true&Query.SubnetId=" + (await factory.GetOnlySubnetAsync()).Id);
+        var poolHtml = await response.Content.ReadAsStringAsync();
+        Assert.Contains("Input.BusinessIp=10.0.0.1", poolHtml, StringComparison.Ordinal);
+
+        var createHtml = await client.GetStringAsync("/servers?Input.BusinessIp=10.0.0.1");
+        Assert.Contains("value=\"10.0.0.1\"", createHtml, StringComparison.Ordinal);
+        var token = Regex.Match(createHtml, "name=\"__RequestVerificationToken\"[^>]*value=\"([^\"]+)\"").Groups[1].Value;
+        var post = await client.PostAsync("/servers?handler=Create", new FormUrlEncodedContent(
+        [new("Input.BusinessIp", "10.0.0.1"), new("Input.Location", "HQ"), new("Input.AliveStatus", "Unknown"),
+         new("Input.ComputerName", "web-01"), new("Input.SystemName", "Web"), new("__RequestVerificationToken", token)]));
+
+        Assert.Equal(HttpStatusCode.Redirect, post.StatusCode);
+        Assert.Equal("10.0.0.1", (await factory.GetAssetsAsync()).Single().BusinessIp);
+    }
+
+    [Fact]
+    public async Task Edit_conflict_renders_current_database_values_not_stale_posted_values()
+    {
+        using var factory = new ServerPageFactory(NewUser(), PermissionCode.AssetView, PermissionCode.AssetEdit);
+        factory.InitializeData();
+        await factory.AddSubnetAsync();
+        var asset = await factory.AddAssetAsync("10.0.0.9", "Current", [1]);
+        using var client = factory.CreateAuthenticatedClient();
+        var html = await client.GetStringAsync($"/servers/{asset.Id}/edit");
+        var token = Regex.Match(html, "name=\"__RequestVerificationToken\"[^>]*value=\"([^\"]+)\"").Groups[1].Value;
+
+        var response = await client.PostAsync($"/servers/{asset.Id}/edit", new FormUrlEncodedContent(
+        [new("id", asset.Id.ToString()), new("rowVersion", Convert.ToBase64String([9])),
+         new("Input.BusinessIp", "10.0.0.9"), new("Input.Location", "Stale"), new("Input.AliveStatus", "Unknown"),
+         new("Input.ComputerName", "stale"), new("Input.SystemName", "Stale"), new("__RequestVerificationToken", token)]));
+        var conflictHtml = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("Current", conflictHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain("value=\"Stale\"", conflictHtml, StringComparison.Ordinal);
+        Assert.Contains("changed by another user", conflictHtml, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Ping_global_concurrency_and_normalized_outcomes_are_enforced()
+    {
+        await using var db = NewDatabase();
+        var actor = await AddUserAsync(db, PermissionCode.AssetCreate, PermissionCode.PingExecute);
+        await AddEnabledSubnetAsync(db, "10.0.0.0/24");
+        var assets = NewAssetService(db);
+        var first = await assets.CreateAsync(Input("10.0.0.9"), actor.Id, default);
+        var second = await assets.CreateAsync(Input("10.0.0.10"), actor.Id, default);
+        var transport = new TrackingPingTransport("UnknownOutcome");
+        var options = Options.Create(new WebPassOptions { PingTimeoutMilliseconds = 1000, PingMaxConcurrency = 1, PingPerUserPerMinute = 5 });
+        var ping = new PingService(db, new PermissionAuthorizationHandler(db), new AuditWriter(db), transport, options);
+
+        await Task.WhenAll(ping.ExecuteAsync(first.Id, actor.Id, default), ping.ExecuteAsync(second.Id, actor.Id, default));
+
+        Assert.Equal(1, transport.MaximumConcurrent);
+        Assert.All(await db.PingResults.ToListAsync(), result => Assert.Equal("InternalError", result.Outcome));
+    }
+
+    [Theory]
+    [InlineData("Timeout")]
+    [InlineData("Unreachable")]
+    [InlineData("Success")]
+    public async Task Ping_persists_normalized_transport_outcomes(string outcome)
+    {
+        await using var db = NewDatabase();
+        var actor = await AddUserAsync(db, PermissionCode.AssetCreate, PermissionCode.PingExecute);
+        await AddEnabledSubnetAsync(db, "10.0.0.0/24");
+        var asset = await NewAssetService(db).CreateAsync(Input("10.0.0.9"), actor.Id, default);
+        var options = Options.Create(new WebPassOptions { PingTimeoutMilliseconds = 1000, PingMaxConcurrency = 2, PingPerUserPerMinute = 5 });
+        var ping = new PingService(db, new PermissionAuthorizationHandler(db), new AuditWriter(db), new TrackingPingTransport(outcome), options);
+
+        await ping.ExecuteAsync(asset.Id, actor.Id, default);
+
+        Assert.Equal(outcome, (await db.PingResults.SingleAsync()).Outcome);
+    }
+
+    [Fact]
+    public async Task Filtered_zero_cidr_pool_uses_bounded_backend_query_without_enumerating_addresses()
+    {
+        await using var db = NewDatabase();
+        await AddEnabledSubnetAsync(db, "0.0.0.0/0");
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        var page = await NewAssetService(db).ListAsync(new ServerListQuery(PoolMode: true, Search: "not-a-real-server", Take: 50), default);
+
+        Assert.Empty(page.Items);
+        Assert.Equal(0, page.TotalCount);
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(2));
+    }
     private static ServerAssetInput Input(string ip, string location = "HQ", AliveStatus status = AliveStatus.Unknown) =>
         new(ip, location, status, "server", "WebPass", null, null, "normal metadata");
 
@@ -270,6 +399,26 @@ public sealed class AssetAndPingTests
             Task.FromResult(new PingTransportResult("Success", 12, null));
     }
 
+    private sealed class TrackingPingTransport(string outcome) : IPingTransport
+    {
+        private int _current;
+        public int MaximumConcurrent { get; private set; }
+
+        public async Task<PingTransportResult> SendAsync(string targetIp, int timeoutMilliseconds, CancellationToken ct)
+        {
+            var current = Interlocked.Increment(ref _current);
+            MaximumConcurrent = Math.Max(MaximumConcurrent, current);
+            try
+            {
+                await Task.Delay(25, ct);
+                return new PingTransportResult(outcome, outcome == "Success" ? 1 : null, null);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _current);
+            }
+        }
+    }
     private sealed class ServerPageFactory(AppUser user, params string[] permissions) : WebApplicationFactory<Program>
     {
         private readonly string _databaseName = Guid.NewGuid().ToString("N");
@@ -282,6 +431,31 @@ public sealed class AssetAndPingTests
             db.Users.Add(user);
             db.UserPermissions.AddRange(_permissions.Select(code => new UserPermission { UserId = user.Id, PermissionCode = code }));
             db.SaveChanges();
+        }
+        public async Task<Subnet> GetOnlySubnetAsync()
+        {
+            using var scope = Services.CreateScope();
+            return await scope.ServiceProvider.GetRequiredService<WebPassDbContext>().Subnets.SingleAsync();
+        }
+
+        public async Task<ServerAsset> AddAssetAsync(string ip, string location, byte[] rowVersion)
+        {
+            using var scope = Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<WebPassDbContext>();
+            var subnet = await db.Subnets.SingleAsync();
+            var asset = new ServerAsset
+            {
+                SubnetId = subnet.Id,
+                BusinessIp = ip,
+                BusinessIpNumber = 167772169,
+                Location = location,
+                ComputerName = "current",
+                SystemName = "Current",
+                RowVersion = rowVersion,
+            };
+            db.ServerAssets.Add(asset);
+            await db.SaveChangesAsync();
+            return asset;
         }
 
         public HttpClient CreateAuthenticatedClient()
