@@ -142,7 +142,7 @@ public sealed class ServerAssetService(
         CancellationToken ct)
     {
         var search = query.Search?.Trim();
-        var primary = await GetPrimaryAssetsAsync(selected, query.IncludeArchived, ct);
+        var hasIpPrefix = TryGetIpPrefixRange(search, out _, out _);
         if (TryParseCanonicalIpv4(search, out var exactAddress))
         {
             var entry = selected.SingleOrDefault(x => x.Cidr.ContainsUsable(exactAddress));
@@ -151,26 +151,42 @@ public sealed class ServerAssetService(
             return new ServerListPage(exactItems.Skip(query.Skip).Take(query.Take).ToList(), exactItems.Count, true, query.Skip, query.Take);
         }
 
-        if (query.Status == Domain.Enums.AliveStatus.Unknown || TryGetIpPrefixRange(search, out _, out _))
-            return await ListGeneratedFilteredPoolAsync(query, selected, primary, search, ct);
+        var canMatchFreeRows = (query.Status is null || query.Status == Domain.Enums.AliveStatus.Unknown) &&
+            (search is null || hasIpPrefix);
+        if (canMatchFreeRows)
+            return await ListGeneratedFilteredPoolAsync(query, selected, search, ct);
 
-        var items = primary.Where(x => (query.Status is null || x.AliveStatus == query.Status) &&
-                (search is null || x.BusinessIp.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-                 x.Location.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-                 x.ComputerName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-                 x.SystemName.Contains(search, StringComparison.OrdinalIgnoreCase)))
-            .OrderBy(x => x.BusinessIpNumber).ToList();
-        return new ServerListPage(items.Skip(query.Skip).Take(query.Take).Select(ToItem).ToList(), items.Count, true, query.Skip, query.Take);
+        return await ListRegisteredFilteredPoolAsync(query, selected, search, ct);
+    }
+
+    private async Task<ServerListPage> ListRegisteredFilteredPoolAsync(
+        ServerListQuery query,
+        IReadOnlyCollection<(Subnet Subnet, Ipv4Cidr Cidr)> selected,
+        string? search,
+        CancellationToken ct)
+    {
+        var assets = PrimaryAssetsQuery(selected, query.IncludeArchived);
+        if (query.Status is { } status) assets = assets.Where(x => x.AliveStatus == status);
+        if (search is not null)
+            assets = assets.Where(x => x.BusinessIp.Contains(search) || x.Location.Contains(search) ||
+                x.ComputerName.Contains(search) || x.SystemName.Contains(search));
+
+        var total = await assets.LongCountAsync(ct);
+        var items = await assets.OrderBy(x => x.BusinessIpNumber).Skip(query.Skip).Take(query.Take)
+            .Select(x => new ServerListItem(x.Id, x.SubnetId, x.BusinessIp, true, x.IsArchived,
+                x.Location, x.AliveStatus, x.ComputerName, x.SystemName, x.RowVersion))
+            .ToListAsync(ct);
+        return new ServerListPage(items, total, true, query.Skip, query.Take);
     }
 
     private async Task<ServerListPage> ListGeneratedFilteredPoolAsync(
         ServerListQuery query,
         IReadOnlyCollection<(Subnet Subnet, Ipv4Cidr Cidr)> selected,
-        IReadOnlyCollection<ServerAsset> primary,
         string? search,
         CancellationToken ct)
     {
         var hasRange = TryGetIpPrefixRange(search, out var rangeStart, out var rangeEnd);
+        var primary = PrimaryAssetsQuery(selected, query.IncludeArchived);
         long total = 0;
         var items = new List<ServerListItem>(query.Take);
         foreach (var entry in selected)
@@ -181,41 +197,107 @@ public sealed class ServerAssetService(
             var end = hasRange ? Math.Min(broadcast, rangeEnd) : broadcast;
             if (start > end) continue;
 
-            var blocked = primary.Where(x => x.SubnetId == entry.Subnet.Id && x.BusinessIpNumber >= start && x.BusinessIpNumber <= end &&
-                    query.Status is { } status && x.AliveStatus != status)
-                .Select(x => x.BusinessIpNumber).Distinct().OrderBy(x => x).ToList();
-            var cursor = start;
-            foreach (var block in blocked.Append(end + 1))
+            var blockedCount = query.Status is { } status
+                ? await CountBlockedAsync(primary, entry.Subnet.Id, start, end, status, ct)
+                : 0;
+            var entryTotal = end - start + 1 - blockedCount;
+            if (total + entryTotal <= query.Skip)
             {
-                if (cursor < block)
-                {
-                    var length = block - cursor;
-                    if (total + length > query.Skip && items.Count < query.Take)
-                    {
-                        var localSkip = Math.Max(0L, query.Skip - total);
-                        var take = (int)Math.Min((long)query.Take - items.Count, length - localSkip);
-                        var offset = cursor - network + localSkip;
-                        items.AddRange(await BuildPoolItemsAsync(entry.Subnet, entry.Cidr.EnumerateUsableAddresses(offset, take).ToArray(), query, ct));
-                    }
-                    total += length;
-                }
-                cursor = block + 1;
+                total += entryTotal;
+                continue;
             }
+
+            var localSkip = Math.Max(0L, query.Skip - total);
+            var take = (int)Math.Min((long)query.Take - items.Count, entryTotal - localSkip);
+            if (take > 0)
+            {
+                var addresses = query.Status is { } requiredStatus
+                    ? await GetUnblockedPageAddressesAsync(primary, entry.Subnet.Id, entry.Cidr, network, start, end,
+                        localSkip + 1, take, requiredStatus, ct)
+                    : entry.Cidr.EnumerateUsableAddresses(start - network + localSkip, take).ToArray();
+                items.AddRange(await BuildPoolItemsAsync(entry.Subnet, addresses, query, ct));
+            }
+            total += entryTotal;
         }
         return new ServerListPage(items, total, true, query.Skip, query.Take);
     }
 
-    private async Task<IReadOnlyCollection<ServerAsset>> GetPrimaryAssetsAsync(
-        IReadOnlyCollection<(Subnet Subnet, Ipv4Cidr Cidr)> selected,
-        bool includeArchived,
+    private static Task<long> CountBlockedAsync(
+        IQueryable<ServerAsset> primary,
+        Guid subnetId,
+        long start,
+        long end,
+        Domain.Enums.AliveStatus requiredStatus,
+        CancellationToken ct) =>
+        primary.Where(x => x.SubnetId == subnetId && x.BusinessIpNumber >= start && x.BusinessIpNumber <= end &&
+            x.AliveStatus != requiredStatus).LongCountAsync(ct);
+
+    private async Task<long> FindUnblockedNumberAsync(
+        IQueryable<ServerAsset> primary,
+        Guid subnetId,
+        long start,
+        long end,
+        long rank,
+        Domain.Enums.AliveStatus requiredStatus,
         CancellationToken ct)
     {
+        var lower = start;
+        var upper = end;
+        while (lower < upper)
+        {
+            var middle = lower + (upper - lower) / 2;
+            var blocked = await CountBlockedAsync(primary, subnetId, start, middle, requiredStatus, ct);
+            var available = middle - start + 1 - blocked;
+            if (available >= rank) upper = middle;
+            else lower = middle + 1;
+        }
+        return lower;
+    }
+
+    private async Task<IReadOnlyCollection<IPAddress>> GetUnblockedPageAddressesAsync(
+        IQueryable<ServerAsset> primary,
+        Guid subnetId,
+        Ipv4Cidr cidr,
+        long network,
+        long start,
+        long end,
+        long rank,
+        int take,
+        Domain.Enums.AliveStatus requiredStatus,
+        CancellationToken ct)
+    {
+        const int chunkSize = 2048;
+        var cursor = await FindUnblockedNumberAsync(primary, subnetId, start, end, rank, requiredStatus, ct);
+        var addresses = new List<IPAddress>(take);
+        while (cursor <= end && addresses.Count < take)
+        {
+            var chunkEnd = Math.Min(end, cursor + chunkSize - 1);
+            var blocked = await primary.Where(x => x.SubnetId == subnetId && x.BusinessIpNumber >= cursor &&
+                    x.BusinessIpNumber <= chunkEnd && x.AliveStatus != requiredStatus)
+                .Select(x => x.BusinessIpNumber).ToListAsync(ct);
+            var blockedNumbers = blocked.ToHashSet();
+            foreach (var address in cidr.EnumerateUsableAddresses(cursor - network, (int)(chunkEnd - cursor + 1)))
+            {
+                if (!blockedNumbers.Contains(ToNumber(address))) addresses.Add(address);
+                if (addresses.Count == take) break;
+            }
+            cursor = chunkEnd + 1;
+        }
+        return addresses;
+    }
+
+    private IQueryable<ServerAsset> PrimaryAssetsQuery(
+        IReadOnlyCollection<(Subnet Subnet, Ipv4Cidr Cidr)> selected,
+        bool includeArchived)
+    {
         var subnetIds = selected.Select(x => x.Subnet.Id).ToArray();
-        var all = await db.ServerAssets.AsNoTracking().Where(x => subnetIds.Contains(x.SubnetId)).ToListAsync(ct);
-        return all.GroupBy(x => new { x.SubnetId, x.BusinessIp })
-            .Select(group => group.FirstOrDefault(x => !x.IsArchived) ??
-                (includeArchived ? group.Where(x => x.IsArchived).OrderByDescending(x => x.ArchivedAt).First() : null))
-            .Where(x => x is not null).Cast<ServerAsset>().ToList();
+        var assets = db.ServerAssets.AsNoTracking().Where(x => subnetIds.Contains(x.SubnetId));
+        if (!includeArchived) return assets.Where(x => !x.IsArchived);
+
+        return assets.Where(x => !x.IsArchived ||
+            (!db.ServerAssets.Any(other => other.SubnetId == x.SubnetId && other.BusinessIp == x.BusinessIp && !other.IsArchived) &&
+             !db.ServerAssets.Any(other => other.SubnetId == x.SubnetId && other.BusinessIp == x.BusinessIp &&
+                 other.IsArchived && other.ArchivedAt > x.ArchivedAt)));
     }
 
     private static bool TryGetIpPrefixRange(string? value, out long start, out long end)

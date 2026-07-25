@@ -407,6 +407,51 @@ public sealed class AssetAndPingTests
 
         Assert.DoesNotContain(page.Items, x => x.BusinessIp == active.BusinessIp);
     }
+    [Fact]
+    public async Task Prefix_and_alive_filters_use_registered_rows_for_total_and_paging()
+    {
+        await using var db = NewDatabase();
+        var actor = await AddUserAsync(db, PermissionCode.AssetCreate);
+        var assets = NewAssetService(db);
+        var subnet = await AddEnabledSubnetAsync(db, "10.0.0.0/29");
+        var alive = await assets.CreateAsync(Input("10.0.0.2", status: AliveStatus.Alive), actor.Id, default);
+
+        var page = await assets.ListAsync(new ServerListQuery(SubnetId: subnet.Id, PoolMode: true, Search: "10.0.0.", Status: AliveStatus.Alive, Skip: 0, Take: 3), default);
+
+        Assert.Equal(1, page.TotalCount);
+        Assert.Equal(alive.Id, Assert.Single(page.Items).AssetId);
+    }
+
+    [Fact]
+    public async Task Text_and_unknown_filters_do_not_count_free_pool_rows()
+    {
+        await using var db = NewDatabase();
+        var actor = await AddUserAsync(db, PermissionCode.AssetCreate);
+        var assets = NewAssetService(db);
+        var subnet = await AddEnabledSubnetAsync(db, "10.0.0.0/29");
+        var unknown = await assets.CreateAsync(Input("10.0.0.3", location: "Unique Rack", status: AliveStatus.Unknown), actor.Id, default);
+
+        var page = await assets.ListAsync(new ServerListQuery(SubnetId: subnet.Id, PoolMode: true, Search: "Unique", Status: AliveStatus.Unknown, Skip: 0, Take: 3), default);
+
+        Assert.Equal(1, page.TotalCount);
+        Assert.Equal(unknown.Id, Assert.Single(page.Items).AssetId);
+    }
+
+    [Fact]
+    public async Task Large_subnet_registered_filter_returns_only_registered_page()
+    {
+        await using var db = NewDatabase();
+        var actor = await AddUserAsync(db, PermissionCode.AssetCreate);
+        var assets = NewAssetService(db);
+        await AddEnabledSubnetAsync(db, "0.0.0.0/0");
+        var alive = await assets.CreateAsync(Input("0.0.0.1", status: AliveStatus.Alive), actor.Id, default);
+
+        var page = await assets.ListAsync(new ServerListQuery(PoolMode: true, Status: AliveStatus.Alive, Skip: 0, Take: 1), default);
+
+        Assert.Equal(1, page.TotalCount);
+        Assert.Equal(alive.Id, Assert.Single(page.Items).AssetId);
+    }
+
     private static ServerAssetInput Input(string ip, string location = "HQ", AliveStatus status = AliveStatus.Unknown) =>
         new(ip, location, status, "server", "WebPass", null, null, "normal metadata");
 
