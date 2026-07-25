@@ -53,13 +53,13 @@ public sealed class IndexModel(SubnetService subnetService) : PageModel
         }
     }
 
-    public async Task<IActionResult> OnPostEditAsync(Guid id, string rowVersion, CancellationToken ct) =>
+    public async Task<IActionResult> OnPostEditAsync(Guid id, string? rowVersion, CancellationToken ct) =>
         await ExecuteMutationAsync(() => subnetService.UpdateAsync(id, Input.ToInput(), DecodeRowVersion(rowVersion), UserId(), ct), ct);
 
-    public async Task<IActionResult> OnPostSetEnabledAsync(Guid id, bool isEnabled, string rowVersion, CancellationToken ct) =>
+    public async Task<IActionResult> OnPostSetEnabledAsync(Guid id, bool isEnabled, string? rowVersion, CancellationToken ct) =>
         await ExecuteMutationAsync(() => subnetService.SetEnabledAsync(id, isEnabled, DecodeRowVersion(rowVersion), UserId(), ct), ct);
 
-    public async Task<IActionResult> OnPostDeleteAsync(Guid id, string rowVersion, CancellationToken ct) =>
+    public async Task<IActionResult> OnPostDeleteAsync(Guid id, string? rowVersion, CancellationToken ct) =>
         await ExecuteMutationAsync(() => subnetService.DeleteAsync(id, DecodeRowVersion(rowVersion), UserId(), ct), ct);
 
     private async Task<IActionResult> ExecuteMutationAsync(Func<Task> command, CancellationToken ct)
@@ -68,6 +68,10 @@ public sealed class IndexModel(SubnetService subnetService) : PageModel
         {
             await command();
             return RedirectToPage();
+        }
+        catch (ArgumentException exception)
+        {
+            return BadRequest(exception.Message);
         }
         catch (Exception exception) when (exception is InvalidOperationException or UnauthorizedAccessException)
         {
@@ -79,7 +83,22 @@ public sealed class IndexModel(SubnetService subnetService) : PageModel
 
     private async Task LoadAsync(CancellationToken ct) => Subnets = await subnetService.ListAsync(UserId(), ct);
     private Guid UserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-    private static byte[] DecodeRowVersion(string value) => Convert.FromBase64String(value);
+    private static byte[] DecodeRowVersion(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new ArgumentException("A row version is required.", nameof(value));
+        }
+        try
+        {
+            var rowVersion = Convert.FromBase64String(value);
+            return rowVersion.Length == 0 ? throw new ArgumentException("A row version is required.", nameof(value)) : rowVersion;
+        }
+        catch (FormatException)
+        {
+            throw new ArgumentException("The row version is invalid.", nameof(value));
+        }
+    }
 
     public sealed class SubnetForm
     {

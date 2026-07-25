@@ -55,9 +55,11 @@ public sealed class SubnetServiceTests
             SystemName = "test",
         });
         await db.SaveChangesAsync();
+        subnet.RowVersion = [1];
+        await db.SaveChangesAsync();
 
-        await service.SetEnabledAsync(subnet.Id, false, subnet.RowVersion, actor.Id, default);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.DeleteAsync(subnet.Id, subnet.RowVersion, actor.Id, default));
+        await service.SetEnabledAsync(subnet.Id, false, [1], actor.Id, default);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.DeleteAsync(subnet.Id, [1], actor.Id, default));
     }
 
     [Fact]

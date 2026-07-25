@@ -136,7 +136,7 @@ public sealed class SubnetService(
     {
         if (rowVersion is null || rowVersion.Length == 0)
         {
-            return;
+            throw new ArgumentException("A row version is required.", nameof(rowVersion));
         }
 
         db.Entry(subnet).Property(x => x.RowVersion).OriginalValue = rowVersion;
