@@ -1,0 +1,69 @@
+@page "/servers"
+@model WebPass.Web.Pages.Servers.IndexModel
+@{
+    ViewData["Title"] = "Servers";
+}
+
+<h1>Server inventory</h1>
+<div asp-validation-summary="ModelOnly"></div>
+
+<form method="get">
+    <label>Search <input asp-for="Query.Search" /></label>
+    <label>Subnet <input asp-for="Query.SubnetId" /></label>
+    <label>Status <select asp-for="Query.Status" asp-items="Html.GetEnumSelectList<WebPass.Web.Domain.Enums.AliveStatus>()"><option value="">Any</option></select></label>
+    <label>Include archived <input asp-for="Query.IncludeArchived" /></label>
+    <label>Full address pool <input asp-for="Query.PoolMode" /></label>
+    <input type="hidden" asp-for="Query.Skip" />
+    <input type="hidden" asp-for="Query.Take" />
+    <button type="submit">Filter</button>
+</form>
+
+<form method="post" asp-page-handler="Create">
+    <h2>Register server</h2>
+    <label asp-for="Input.BusinessIp"></label><input asp-for="Input.BusinessIp" />
+    <label asp-for="Input.Location"></label><input asp-for="Input.Location" />
+    <label asp-for="Input.AliveStatus"></label><select asp-for="Input.AliveStatus" asp-items="Html.GetEnumSelectList<WebPass.Web.Domain.Enums.AliveStatus>()"></select>
+    <label asp-for="Input.ComputerName"></label><input asp-for="Input.ComputerName" />
+    <label asp-for="Input.SystemName"></label><input asp-for="Input.SystemName" />
+    <label asp-for="Input.OperatingSystemVersion"></label><input asp-for="Input.OperatingSystemVersion" />
+    <label asp-for="Input.DatabaseVersion"></label><input asp-for="Input.DatabaseVersion" />
+    <label asp-for="Input.Notes"></label><textarea asp-for="Input.Notes"></textarea>
+    <button type="submit">Create server</button>
+</form>
+
+<table>
+    <thead><tr><th>Business IP</th><th>Location</th><th>Status</th><th>Computer</th><th>System</th><th>Actions</th></tr></thead>
+    <tbody>
+    @foreach (var item in Model.Results.Items)
+    {
+        <tr>
+            <td>@item.BusinessIp</td><td>@item.Location</td><td>@item.AliveStatus</td><td>@item.ComputerName</td><td>@item.SystemName</td>
+            <td>
+            @if (item.IsRegistered && item.AssetId is { } id)
+            {
+                <a asp-page="/Servers/Edit" asp-route-id="@id">Edit</a>
+                <form method="post" asp-page-handler="Ping">
+                    <input type="hidden" name="id" value="@id" />
+                    <button type="submit">Ping</button>
+                </form>
+                <form method="post" asp-page-handler="MarkAlive">
+                    <input type="hidden" name="id" value="@id" />
+                    <input type="hidden" name="rowVersion" value="@Convert.ToBase64String(item.RowVersion ?? [])" />
+                    <button type="submit">Mark alive</button>
+                </form>
+                <form method="post" asp-page-handler="Archive">
+                    <input type="hidden" name="id" value="@id" />
+                    <input type="hidden" name="rowVersion" value="@Convert.ToBase64String(item.RowVersion ?? [])" />
+                    <button type="submit">Archive</button>
+                </form>
+            }
+            else
+            {
+                <a asp-page="/Servers/Edit" asp-route-businessIp="@item.BusinessIp">Register this IP</a>
+            }
+            </td>
+        </tr>
+    }
+    </tbody>
+</table>
+<p>Showing @Model.Results.Items.Count of @Model.Results.TotalCount.</p>

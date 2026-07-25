@@ -1,0 +1,32 @@
+@using System.Security.Claims
+@using WebPass.Web.Application.Authorization
+@using WebPass.Web.Infrastructure.Authorization
+@inject PermissionAuthorizationHandler PermissionAuthorization
+@{
+    Guid userId = Guid.Empty;
+    var hasUser = User.Identity?.IsAuthenticated == true &&
+        Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out userId);
+    var canViewAssets = hasUser && await PermissionAuthorization.IsAllowedAsync(userId, PermissionCode.AssetView, Context.RequestAborted);
+    var canManageSubnets = hasUser && await PermissionAuthorization.IsAllowedAsync(userId, PermissionCode.SubnetManage, Context.RequestAborted);
+    var canViewAudit = hasUser && await PermissionAuthorization.IsAllowedAsync(userId, PermissionCode.AuditView, Context.RequestAborted);
+    var isAdministrator = hasUser && await PermissionAuthorization.IsAdministratorAsync(userId, Context.RequestAborted);
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>@ViewData["Title"] - WebPass</title>
+</head>
+<body>
+    <nav aria-label="Main navigation">
+        @if (canViewAssets) { <a href="/servers">Servers</a> }
+        @if (canManageSubnets) { <a href="/subnets">Subnets</a> }
+        @if (canViewAudit) { <a href="/audit">Audit</a> }
+        @if (isAdministrator) { <a href="/admin/users">Users</a> }
+        @if (!hasUser) { <a href="/login">Login</a> }
+    </nav>
+    <main>
+        @RenderBody()
+    </main>
+</body>
+</html>

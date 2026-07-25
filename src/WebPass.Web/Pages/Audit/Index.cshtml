@@ -1,0 +1,16 @@
+@page "/audit"
+@model WebPass.Web.Pages.Audit.IndexModel
+@{
+    ViewData["Title"] = "Audit";
+}
+
+<h1>Audit log</h1>
+<table>
+    <thead><tr><th>When</th><th>Actor</th><th>Action</th><th>Object</th><th>Result</th><th>Correlation</th></tr></thead>
+    <tbody>
+    @foreach (var entry in Model.Entries)
+    {
+        <tr><td>@entry.OccurredAt</td><td>@entry.ActorUserId</td><td>@entry.Action</td><td>@entry.ObjectType @entry.ObjectId</td><td>@entry.Result</td><td>@entry.CorrelationId</td></tr>
+    }
+    </tbody>
+</table>

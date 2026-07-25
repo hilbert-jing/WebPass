@@ -1,0 +1,8 @@
+@page "/error"
+@model WebPass.Web.Pages.ErrorModel
+@{
+    ViewData["Title"] = "Request error";
+}
+
+<h1>We could not complete that request.</h1>
+<p>Reference: @Model.CorrelationId</p>

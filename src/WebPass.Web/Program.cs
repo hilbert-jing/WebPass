@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using WebPass.Web.Application.Authorization;
+using WebPass.Web.Application.Assets;
+using WebPass.Web.Application.Ping;
 using WebPass.Web.Application.Subnets;
 using WebPass.Web.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -10,6 +12,7 @@ using WebPass.Web.Data;
 using WebPass.Web.Configuration;
 using WebPass.Web.Infrastructure.Auditing;
 using WebPass.Web.Infrastructure.Identity;
+using WebPass.Web.Infrastructure.Networking;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -50,9 +53,13 @@ builder.Services.AddScoped<AuditWriter>();
 builder.Services.AddScoped<LoginService>();
 builder.Services.AddScoped<PermissionAuthorizationHandler>();
 builder.Services.AddScoped<IAuthorizationHandler>(services => services.GetRequiredService<PermissionAuthorizationHandler>());
+builder.Services.AddScoped<ServerAssetService>();
+builder.Services.AddScoped<PingService>();
+builder.Services.AddScoped<IPingTransport, SystemPingTransport>();
 builder.Services.AddScoped<SubnetService>();
 
 var app = builder.Build();
+app.UseExceptionHandler("/error");
 
 app.UseAuthentication();
 app.UseAuthorization();
