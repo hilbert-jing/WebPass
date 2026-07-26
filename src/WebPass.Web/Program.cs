@@ -74,6 +74,7 @@ builder.Services.AddScoped<IAuthorizationHandler>(services => services.GetRequir
 builder.Services.AddScoped<ServerAssetService>();
 builder.Services.AddScoped<ExportDocumentWriter>();
 builder.Services.AddScoped<AssetExportService>();
+builder.Services.AddScoped<AdministratorPasswordExportService>();
 builder.Services.AddScoped<PingService>();
 builder.Services.AddScoped<IPingTransport, SystemPingTransport>();
 builder.Services.AddScoped<SubnetService>();

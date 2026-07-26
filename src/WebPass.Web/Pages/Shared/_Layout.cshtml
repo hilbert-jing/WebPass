@@ -27,6 +27,7 @@
         @if (canExport) { <a href="/exports">Export</a> }
         @if (canViewAudit) { <a href="/audit">Audit</a> }
         @if (isAdministrator) { <a href="/admin/users">Users</a> }
+        @if (isAdministrator) { <a href="/admin/password-export">Password export</a> }
         @if (!hasUser) { <a href="/login">Login</a> }
     </nav>
     <main>
