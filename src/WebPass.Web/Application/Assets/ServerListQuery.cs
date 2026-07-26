@@ -21,6 +21,9 @@ public sealed record ServerListItem(
     AliveStatus? AliveStatus,
     string? ComputerName,
     string? SystemName,
+    string? OperatingSystemVersion,
+    string? DatabaseVersion,
+    string? Notes,
     byte[]? RowVersion);
 
 public sealed record ServerListPage(

@@ -7,11 +7,12 @@ using WebPass.Web.Application.Assets;
 using WebPass.Web.Application.Authorization;
 using WebPass.Web.Data;
 using WebPass.Web.Domain.Entities;
+using WebPass.Web.Infrastructure.Authorization;
 
 namespace WebPass.Web.Pages.Servers;
 
 [Authorize(Policy = PermissionCode.AssetView)]
-public sealed class EditModel(WebPassDbContext db, ServerAssetService assetService) : PageModel
+public sealed class EditModel(WebPassDbContext db, ServerAssetService assetService, PermissionAuthorizationHandler permissions) : PageModel
 {
     [BindProperty]
     public IndexModel.ServerForm Input { get; set; } = new();
@@ -21,6 +22,7 @@ public sealed class EditModel(WebPassDbContext db, ServerAssetService assetServi
 
     public async Task<IActionResult> OnGetAsync(Guid? id, string? businessIp, CancellationToken ct)
     {
+        if (!await permissions.IsAllowedAsync(UserId(), id is null ? PermissionCode.AssetCreate : PermissionCode.AssetEdit, ct)) return Forbid();
         if (id is null)
         {
             if (!string.IsNullOrWhiteSpace(businessIp)) Input.BusinessIp = businessIp;
@@ -47,6 +49,7 @@ public sealed class EditModel(WebPassDbContext db, ServerAssetService assetServi
 
     public async Task<IActionResult> OnPostAsync(Guid id, string? rowVersion, CancellationToken ct)
     {
+        if (!await permissions.IsAllowedAsync(UserId(), PermissionCode.AssetEdit, ct)) return Forbid();
         try
         {
             await assetService.UpdateAsync(id, Input.ToInput(), DecodeRowVersion(rowVersion), UserId(), ct);
@@ -63,7 +66,8 @@ public sealed class EditModel(WebPassDbContext db, ServerAssetService assetServi
         {
             return BadRequest(exception.Message);
         }
-        catch (Exception exception) when (exception is InvalidOperationException or UnauthorizedAccessException)
+        catch (UnauthorizedAccessException) { return Forbid(); }
+        catch (InvalidOperationException exception)
         {
             ModelState.AddModelError(string.Empty, exception.Message);
             return await OnGetAsync(id, null, ct);

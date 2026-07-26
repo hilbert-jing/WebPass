@@ -6,6 +6,10 @@
 
 <h1>Server inventory</h1>
 <div asp-validation-summary="ModelOnly"></div>
+@if (TempData["PingResult"] is string pingResult)
+{
+    <p role="status">Ping: @pingResult</p>
+}
 
 <form method="get">
     <label>Search <input asp-for="Query.Search" /></label>
@@ -18,6 +22,8 @@
     <button type="submit">Filter</button>
 </form>
 
+@if (Model.CanCreate)
+{
 <form method="post" asp-page-handler="Create">
     <h2>Register server</h2>
     <label asp-for="Input.BusinessIp"></label><input asp-for="Input.BusinessIp" />
@@ -30,36 +36,43 @@
     <label asp-for="Input.Notes"></label><textarea asp-for="Input.Notes"></textarea>
     <button type="submit">Create server</button>
 </form>
+}
 
 <table>
-    <thead><tr><th>Business IP</th><th>Location</th><th>Status</th><th>Computer</th><th>System</th><th>Actions</th></tr></thead>
+    <thead><tr><th>Business IP</th><th>Location</th><th>Status</th><th>Computer</th><th>System</th><th>OS version</th><th>DB version</th><th>Notes</th><th>Actions</th></tr></thead>
     <tbody>
     @foreach (var item in Model.Results.Items)
     {
         <tr>
-            <td>@item.BusinessIp</td><td>@item.Location</td><td>@item.AliveStatus</td><td>@item.ComputerName</td><td>@item.SystemName</td>
+            <td>@item.BusinessIp</td><td>@item.Location</td><td>@item.AliveStatus</td><td>@item.ComputerName</td><td>@item.SystemName</td><td>@item.OperatingSystemVersion</td><td>@item.DatabaseVersion</td><td>@item.Notes</td>
             <td>
             @if (item.IsRegistered && item.AssetId is { } id)
             {
-                <a asp-page="/Servers/Edit" asp-route-id="@id">Edit</a>
+                @if (Model.CanEdit) { <a asp-page="/Servers/Edit" asp-route-id="@id">Edit</a> }
+                @if (Model.CanPing) {
                 <form method="post" asp-page-handler="Ping">
                     <input type="hidden" name="id" value="@id" />
                     <button type="submit">Ping</button>
                 </form>
+                }
+                @if (Model.CanMarkAlive) {
                 <form method="post" asp-page-handler="MarkAlive">
                     <input type="hidden" name="id" value="@id" />
                     <input type="hidden" name="rowVersion" value="@Convert.ToBase64String(item.RowVersion ?? [])" />
                     <button type="submit">Mark alive</button>
                 </form>
+                }
+                @if (Model.CanArchive) {
                 <form method="post" asp-page-handler="Archive">
                     <input type="hidden" name="id" value="@id" />
                     <input type="hidden" name="rowVersion" value="@Convert.ToBase64String(item.RowVersion ?? [])" />
                     <button type="submit">Archive</button>
                 </form>
+                }
             }
             else
             {
-                <a href="/servers?Input.BusinessIp=@item.BusinessIp">Register this IP</a>
+                @if (Model.CanCreate) { <a href="/servers?Input.BusinessIp=@item.BusinessIp">Register this IP</a> }
             }
             </td>
         </tr>
@@ -67,3 +80,23 @@
     </tbody>
 </table>
 <p>Showing @Model.Results.Items.Count of @Model.Results.TotalCount.</p>
+<nav aria-label="Server pages">
+    @if (Model.Query.Skip > 0)
+    {
+        <form method="get">
+            <input type="hidden" asp-for="Query.Search" /><input type="hidden" asp-for="Query.SubnetId" />
+            <input type="hidden" asp-for="Query.Status" /><input type="hidden" asp-for="Query.IncludeArchived" />
+            <input type="hidden" asp-for="Query.PoolMode" /><input type="hidden" asp-for="Query.Take" />
+            <button type="submit" name="Query.Skip" value="@Math.Max(0, Model.Query.Skip - Model.Query.Take)">Previous</button>
+        </form>
+    }
+    @if ((long)Model.Query.Skip + Model.Results.Items.Count < Model.Results.TotalCount)
+    {
+        <form method="get">
+            <input type="hidden" asp-for="Query.Search" /><input type="hidden" asp-for="Query.SubnetId" />
+            <input type="hidden" asp-for="Query.Status" /><input type="hidden" asp-for="Query.IncludeArchived" />
+            <input type="hidden" asp-for="Query.PoolMode" /><input type="hidden" asp-for="Query.Take" />
+            <button type="submit" name="Query.Skip" value="@(Model.Query.Skip + Model.Query.Take)">Next</button>
+        </form>
+    }
+</nav>

@@ -1,3 +1,5 @@
+using System.Data;
+using System.Net;
 using Microsoft.EntityFrameworkCore;
 using WebPass.Web.Application.Authorization;
 using WebPass.Web.Application.Networking;
@@ -40,6 +42,7 @@ public sealed class SubnetService(
     public async Task<Subnet> CreateAsync(SubnetInput input, Guid actorUserId, CancellationToken ct)
     {
         await EnsureAllowedAsync(actorUserId, ct);
+        await using var transaction = db.Database.IsRelational() ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct) : null;
         var cidr = Ipv4Cidr.Parse(input.Cidr);
         await EnsureDoesNotOverlapAsync(cidr, null, ct);
         var subnet = new Subnet
@@ -55,16 +58,24 @@ public sealed class SubnetService(
         db.Subnets.Add(subnet);
         await db.SaveChangesAsync(ct);
         await WriteAuditAsync("SubnetCreate", subnet, actorUserId, ct);
+        if (transaction is not null) await transaction.CommitAsync(ct);
         return subnet;
     }
 
     public async Task<Subnet> UpdateAsync(Guid subnetId, SubnetInput input, byte[] rowVersion, Guid actorUserId, CancellationToken ct)
     {
         await EnsureAllowedAsync(actorUserId, ct);
+        await using var transaction = db.Database.IsRelational() ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct) : null;
         var subnet = await FindSubnetAsync(subnetId, ct);
         SetOriginalRowVersion(subnet, rowVersion);
         var cidr = Ipv4Cidr.Parse(input.Cidr);
         await EnsureDoesNotOverlapAsync(cidr, subnetId, ct);
+        var assetIps = await db.ServerAssets.Where(x => x.SubnetId == subnetId).Select(x => x.BusinessIp).ToListAsync(ct);
+        if (assetIps.Any(value => !IPAddress.TryParse(value, out var address) || !cidr.ContainsUsable(address)))
+        {
+            throw new InvalidOperationException("The subnet range cannot exclude an associated asset address.");
+        }
+
         subnet.Name = Required(input.Name, nameof(input.Name));
         subnet.Cidr = cidr.ToString();
         subnet.NetworkAddress = cidr.NetworkAddress.ToString();
@@ -73,6 +84,7 @@ public sealed class SubnetService(
         subnet.Notes = input.Notes;
         subnet.IsEnabled = input.IsEnabled;
         await SaveAndAuditAsync("SubnetEdit", subnet, actorUserId, ct);
+        if (transaction is not null) await transaction.CommitAsync(ct);
         return subnet;
     }
 
@@ -80,15 +92,18 @@ public sealed class SubnetService(
     {
         await EnsureAllowedAsync(actorUserId, ct);
         var subnet = await FindSubnetAsync(subnetId, ct);
+        await using var transaction = db.Database.IsRelational() ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct) : null;
         SetOriginalRowVersion(subnet, rowVersion);
         subnet.IsEnabled = isEnabled;
         await SaveAndAuditAsync(isEnabled ? "SubnetEnable" : "SubnetDisable", subnet, actorUserId, ct);
+        if (transaction is not null) await transaction.CommitAsync(ct);
     }
 
     public async Task DeleteAsync(Guid subnetId, byte[] rowVersion, Guid actorUserId, CancellationToken ct)
     {
         await EnsureAllowedAsync(actorUserId, ct);
         var subnet = await FindSubnetAsync(subnetId, ct);
+        await using var transaction = db.Database.IsRelational() ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct) : null;
         SetOriginalRowVersion(subnet, rowVersion);
         if (await db.ServerAssets.AnyAsync(x => x.SubnetId == subnetId, ct))
         {
@@ -107,6 +122,7 @@ public sealed class SubnetService(
 
         await auditWriter.WriteAsync(new AuditEntry(actorUserId, "SubnetDelete", "Subnet", subnetId.ToString(), "Success", null,
             Payload: RedactedPayload(subnet)), ct);
+        if (transaction is not null) await transaction.CommitAsync(ct);
     }
 
     private async Task EnsureAllowedAsync(Guid actorUserId, CancellationToken ct)

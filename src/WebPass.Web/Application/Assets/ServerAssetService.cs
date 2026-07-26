@@ -20,6 +20,7 @@ public sealed class ServerAssetService(
         await EnsureAllowedAsync(actorUserId, PermissionCode.AssetCreate, ct);
         var (address, canonicalIp, number) = ParseAddress(input.BusinessIp);
         var subnet = await FindEnabledContainingSubnetAsync(address, ct);
+        ValidateAliveStatus(input.AliveStatus);
         await EnsureActiveIpAvailableAsync(canonicalIp, null, ct);
 
         var asset = new ServerAsset
@@ -31,9 +32,9 @@ public sealed class ServerAssetService(
             AliveStatus = input.AliveStatus,
             ComputerName = Required(input.ComputerName, nameof(input.ComputerName), 256),
             SystemName = Required(input.SystemName, nameof(input.SystemName), 256),
-            OperatingSystemVersion = Optional(input.OperatingSystemVersion),
-            DatabaseVersion = Optional(input.DatabaseVersion),
-            Notes = Optional(input.Notes),
+            OperatingSystemVersion = Optional(input.OperatingSystemVersion, nameof(input.OperatingSystemVersion), 256),
+            DatabaseVersion = Optional(input.DatabaseVersion, nameof(input.DatabaseVersion), 256),
+            Notes = Optional(input.Notes, nameof(input.Notes), 4000),
             CreatedBy = actorUserId,
         };
         // SQL Server populates rowversion. This gives the in-memory provider a usable concurrency token too.
@@ -51,6 +52,7 @@ public sealed class ServerAssetService(
     {
         await EnsureAllowedAsync(actorUserId, PermissionCode.AssetEdit, ct);
         var asset = await FindActiveAssetAsync(assetId, ct);
+        ValidateAliveStatus(input.AliveStatus);
         SetOriginalRowVersion(asset, rowVersion);
         var (address, canonicalIp, number) = ParseAddress(input.BusinessIp);
         var subnet = await FindEnabledContainingSubnetAsync(address, ct);
@@ -63,9 +65,9 @@ public sealed class ServerAssetService(
         asset.AliveStatus = input.AliveStatus;
         asset.ComputerName = Required(input.ComputerName, nameof(input.ComputerName), 256);
         asset.SystemName = Required(input.SystemName, nameof(input.SystemName), 256);
-        asset.OperatingSystemVersion = Optional(input.OperatingSystemVersion);
-        asset.DatabaseVersion = Optional(input.DatabaseVersion);
-        asset.Notes = Optional(input.Notes);
+        asset.OperatingSystemVersion = Optional(input.OperatingSystemVersion, nameof(input.OperatingSystemVersion), 256);
+        asset.DatabaseVersion = Optional(input.DatabaseVersion, nameof(input.DatabaseVersion), 256);
+        asset.Notes = Optional(input.Notes, nameof(input.Notes), 4000);
         asset.UpdatedAt = DateTimeOffset.UtcNow;
         asset.UpdatedBy = actorUserId;
 
@@ -174,7 +176,8 @@ public sealed class ServerAssetService(
         var total = await assets.LongCountAsync(ct);
         var items = await assets.OrderBy(x => x.BusinessIpNumber).Skip(query.Skip).Take(query.Take)
             .Select(x => new ServerListItem(x.Id, x.SubnetId, x.BusinessIp, true, x.IsArchived,
-                x.Location, x.AliveStatus, x.ComputerName, x.SystemName, x.RowVersion))
+                x.Location, x.AliveStatus, x.ComputerName, x.SystemName, x.OperatingSystemVersion,
+                x.DatabaseVersion, x.Notes, x.RowVersion))
             .ToListAsync(ct);
         return new ServerListPage(items, total, true, query.Skip, query.Take);
     }
@@ -344,7 +347,7 @@ public sealed class ServerAssetService(
                 continue;
             }
             if ((query.Status is null || query.Status == Domain.Enums.AliveStatus.Unknown) && (search is null || ip.Contains(search, StringComparison.OrdinalIgnoreCase)))
-                items.Add(new ServerListItem(null, subnet.Id, ip, false, false, null, Domain.Enums.AliveStatus.Unknown, null, null, null));
+                items.Add(new ServerListItem(null, subnet.Id, ip, false, false, null, Domain.Enums.AliveStatus.Unknown, null, null, null, null, null, null));
         }
         return items;
     }
@@ -407,7 +410,7 @@ public sealed class ServerAssetService(
             }), ct);
 
     private static ServerListItem ToItem(ServerAsset asset) => new(asset.Id, asset.SubnetId, asset.BusinessIp, true, asset.IsArchived,
-        asset.Location, asset.AliveStatus, asset.ComputerName, asset.SystemName, asset.RowVersion);
+        asset.Location, asset.AliveStatus, asset.ComputerName, asset.SystemName, asset.OperatingSystemVersion, asset.DatabaseVersion, asset.Notes, asset.RowVersion);
 
     private static (IPAddress Address, string CanonicalIp, long Number) ParseAddress(string value)
     {
@@ -432,7 +435,19 @@ public sealed class ServerAssetService(
         return trimmed;
     }
 
-    private static string? Optional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    private static string? Optional(string? value, string name, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var trimmed = value.Trim();
+        if (trimmed.Length > maxLength) throw new ArgumentException($"Value exceeds {maxLength} characters.", name);
+        return trimmed;
+    }
+
+    private static void ValidateAliveStatus(Domain.Enums.AliveStatus value)
+    {
+        if (!Enum.IsDefined(value)) throw new ArgumentOutOfRangeException(nameof(value));
+    }
+
 
     private static void ValidateQuery(ServerListQuery query)
     {

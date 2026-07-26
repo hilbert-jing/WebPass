@@ -100,6 +100,7 @@ public sealed class SubnetConcurrencyAndAuditTests
         await db.SaveChangesAsync();
 
         await service.UpdateAsync(edit.Id, Input("10.0.0.0/24", "Edited"), [1], actor.Id, default);
+
         await service.SetEnabledAsync(disable.Id, false, [2], actor.Id, default);
         await service.DeleteAsync(delete.Id, [3], actor.Id, default);
 
@@ -108,6 +109,32 @@ public sealed class SubnetConcurrencyAndAuditTests
         Assert.Contains("SubnetDisable", actions);
         Assert.Contains("SubnetDelete", actions);
         Assert.All(db.AuditLogs, audit => Assert.DoesNotContain("password", audit.Details ?? string.Empty, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Update_rejects_a_range_that_would_strand_an_associated_asset()
+    {
+        await using var db = NewDatabase();
+        var (service, actor) = await NewServiceAsync(db);
+        var subnet = await service.CreateAsync(Input("10.0.0.0/24"), actor.Id, default);
+        subnet.RowVersion = [1];
+        db.ServerAssets.Add(new ServerAsset
+        {
+            SubnetId = subnet.Id,
+            BusinessIp = "10.0.0.9",
+            BusinessIpNumber = 167772169,
+            Location = "HQ",
+            ComputerName = "web-09",
+            SystemName = "Web",
+            RowVersion = [1],
+        });
+        await db.SaveChangesAsync();
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.UpdateAsync(subnet.Id, Input("10.0.1.0/24"), [1], actor.Id, default));
+
+        Assert.Contains("associated asset", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("10.0.0.0/24", (await db.Subnets.AsNoTracking().SingleAsync(x => x.Id == subnet.Id)).Cidr);
     }
 
     private static SubnetInput Input(string cidr, string name = "Operations") => new(name, cidr, "HQ", null, true);

@@ -15,12 +15,15 @@ public sealed record AuditEntry(
     string? CorrelationId = null,
     IReadOnlyDictionary<string, object?>? Payload = null);
 
-public sealed class AuditWriter(WebPassDbContext db)
+public sealed class AuditWriter(WebPassDbContext db, IHttpContextAccessor? httpContextAccessor = null)
 {
     private static readonly string[] SensitiveNames = ["password", "secret", "ciphertext", "token", "cookie", "authorization", "key"];
 
     public async Task WriteAsync(AuditEntry entry, CancellationToken ct)
     {
+        var context = httpContextAccessor?.HttpContext;
+        var sourceIp = entry.SourceIp?.ToString() ?? context?.Connection.RemoteIpAddress?.ToString();
+        var correlationId = entry.CorrelationId ?? context?.TraceIdentifier;
         var details = entry.Payload is null ? null : SerializeAndValidate(entry.Payload);
 
         db.AuditLogs.Add(new AuditLog
@@ -30,8 +33,8 @@ public sealed class AuditWriter(WebPassDbContext db)
             ObjectType = entry.ObjectType,
             ObjectId = entry.ObjectId,
             Result = entry.Result,
-            SourceIp = entry.SourceIp?.ToString(),
-            CorrelationId = entry.CorrelationId,
+            SourceIp = sourceIp,
+            CorrelationId = correlationId,
             Details = details,
         });
         await db.SaveChangesAsync(ct);

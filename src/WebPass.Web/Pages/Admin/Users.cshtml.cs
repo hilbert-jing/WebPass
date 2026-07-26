@@ -26,6 +26,7 @@ public sealed class UsersModel(
     {
         await EnsureAdministratorAsync(ct);
         var user = await db.Users.SingleOrDefaultAsync(x => x.Id == userId, ct) ?? throw new KeyNotFoundException("User not found.");
+        await using var transaction = db.Database.IsRelational() ? await db.Database.BeginTransactionAsync(ct) : null;
         if (user.IsAdministrator)
         {
             return BadRequest("Administrator accounts cannot be downgraded or disabled here.");
@@ -45,6 +46,7 @@ public sealed class UsersModel(
 
         await auditWriter.WriteAsync(new AuditEntry(UserId(), "UserEnablement", "User", user.Id.ToString(), "Success", null,
             Payload: new Dictionary<string, object?> { ["beforeEnabled"] = before, ["afterEnabled"] = isEnabled }), ct);
+        if (transaction is not null) await transaction.CommitAsync(ct);
         return RedirectToPage();
     }
 

@@ -12,7 +12,19 @@ public sealed class PingModel(PingService pingService) : PageModel
 {
     public async Task<IActionResult> OnPostAsync(Guid id, CancellationToken ct)
     {
-        await pingService.ExecuteAsync(id, Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!), ct);
-        return RedirectToPage("/Servers/Index");
+        try
+        {
+            var result = await pingService.ExecuteAsync(id, Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!), ct);
+            TempData["PingResult"] = $"{result.Outcome}; latency: {(result.LatencyMilliseconds is null ? "n/a" : result.LatencyMilliseconds + " ms")}; executed: {result.ExecutedAt:O}";
+            return RedirectToPage("/Servers/Index");
+        }
+        catch (UnauthorizedAccessException) { return Forbid(); }
+        catch (InvalidOperationException exception)
+        {
+            if (exception.Message.Contains("rate limit", StringComparison.OrdinalIgnoreCase))
+                return new ObjectResult("Ping rate limit exceeded.") { StatusCode = StatusCodes.Status429TooManyRequests };
+            return BadRequest(exception.Message);
+        }
+        catch (KeyNotFoundException exception) { return NotFound(exception.Message); }
     }
 }

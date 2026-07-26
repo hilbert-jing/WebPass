@@ -233,6 +233,30 @@ public sealed class AssetAndPingTests
         Assert.DoesNotContain("href=\"/audit\"", html, StringComparison.Ordinal);
     }
     [Fact]
+    public async Task Asset_view_only_user_sees_no_mutation_controls_and_direct_ping_post_is_forbidden()
+    {
+        using var factory = new ServerPageFactory(NewUser(), PermissionCode.AssetView);
+        factory.InitializeData();
+        await factory.AddSubnetAsync();
+        var asset = await factory.AddAssetAsync("10.0.0.9", "HQ", [1]);
+        using var client = factory.CreateAuthenticatedClient();
+        var html = await client.GetStringAsync("/servers");
+        var tokenHtml = await client.GetStringAsync("/login");
+        var token = Regex.Match(tokenHtml, "name=\"__RequestVerificationToken\"[^>]*value=\"([^\"]+)\"").Groups[1].Value;
+
+        Assert.DoesNotContain("Create server", html, StringComparison.Ordinal);
+        Assert.DoesNotContain(">Edit<", html, StringComparison.Ordinal);
+        Assert.DoesNotContain(">Ping<", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("Mark alive", html, StringComparison.Ordinal);
+        Assert.DoesNotContain(">Archive<", html, StringComparison.Ordinal);
+
+        var response = await client.PostAsync("/servers?handler=Ping", new FormUrlEncodedContent(
+            [new("id", asset.Id.ToString()), new("__RequestVerificationToken", token)]));
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
     public async Task Pool_large_cidr_returns_only_the_requested_page_without_overflow()
     {
         await using var db = NewDatabase();

@@ -42,6 +42,7 @@ builder.Services
             return Task.CompletedTask;
         };
     });
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddDbContext<WebPassDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("WebPass")));
 builder.Services.AddOptions<WebPassOptions>()
