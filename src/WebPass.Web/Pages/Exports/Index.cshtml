@@ -1,0 +1,32 @@
+@page "/exports"
+@model WebPass.Web.Pages.Exports.IndexModel
+@{
+    ViewData["Title"] = "Export servers";
+}
+
+<h1>Export servers</h1>
+<p>Export active registered server inventory. Ordinary exports never contain passwords.</p>
+<div asp-validation-summary="ModelOnly"></div>
+<form method="post" asp-page-handler="Download">
+    <label asp-for="Query.Search"></label>
+    <input asp-for="Query.Search" />
+
+    <label asp-for="Query.SubnetId">Subnet ID</label>
+    <input asp-for="Query.SubnetId" />
+
+    <label asp-for="Query.Status"></label>
+    <select asp-for="Query.Status">
+        <option value="">All</option>
+        <option value="Unknown">Unknown</option>
+        <option value="Alive">Alive</option>
+        <option value="Fault">Fault</option>
+    </select>
+
+    <label asp-for="Format"></label>
+    <select asp-for="Format">
+        <option value="Csv">CSV</option>
+        <option value="Xlsx">XLSX</option>
+    </select>
+
+    <button type="submit">Download export</button>
+</form>
