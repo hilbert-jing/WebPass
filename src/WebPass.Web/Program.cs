@@ -2,17 +2,20 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using WebPass.Web.Application.Authorization;
 using WebPass.Web.Application.Assets;
+using WebPass.Web.Application.Importing;
 using WebPass.Web.Application.Ping;
 using WebPass.Web.Application.Secrets;
 using WebPass.Web.Application.Subnets;
 using WebPass.Web.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using WebPass.Web.Data;
 using WebPass.Web.Configuration;
 using WebPass.Web.Infrastructure.Auditing;
 using WebPass.Web.Infrastructure.Identity;
+using WebPass.Web.Infrastructure.Importing;
 using WebPass.Web.Infrastructure.Networking;
 using WebPass.Web.Infrastructure.Secrets;
 using WebPass.Web.Infrastructure.Security;
@@ -21,6 +24,11 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddRazorPages();
 builder.Services.AddAntiforgery();
+builder.Services.Configure<FormOptions>(options =>
+{
+    options.MemoryBufferThreshold = 11 * 1024 * 1024;
+    options.MultipartBodyLengthLimit = 11 * 1024 * 1024;
+});
 builder.Services.AddAuthorization();
 builder.Services.AddAuthorization(options =>
 {
@@ -74,6 +82,10 @@ builder.Services.AddSingleton<IReauthenticationGrantStore, InMemoryReauthenticat
 builder.Services.AddScoped<IAuthenticationSessionFingerprint, CookieAuthenticationSessionFingerprint>();
 builder.Services.AddScoped<ReauthenticationService>();
 builder.Services.AddScoped<SecretRevealService>();
+builder.Services.AddSingleton<InMemoryImportStageStore>();
+builder.Services.AddScoped<CsvAssetParser>();
+builder.Services.AddScoped<XlsxAssetParser>();
+builder.Services.AddScoped<IImportService, ImportService>();
 
 var app = builder.Build();
 app.UseExceptionHandler("/error");

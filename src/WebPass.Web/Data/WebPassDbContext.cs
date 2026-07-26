@@ -13,6 +13,7 @@ public sealed class WebPassDbContext(DbContextOptions<WebPassDbContext> options)
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<DataEncryptionKey> DataEncryptionKeys => Set<DataEncryptionKey>();
     public DbSet<ServerSecret> ServerSecrets => Set<ServerSecret>();
+    public DbSet<ImportJob> ImportJobs => Set<ImportJob>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -91,6 +92,16 @@ public sealed class WebPassDbContext(DbContextOptions<WebPassDbContext> options)
             entity.HasOne(x => x.ServerAsset).WithOne().HasForeignKey<ServerSecret>(x => x.ServerAssetId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(x => x.DataEncryptionKey).WithMany(x => x.ServerSecrets).HasForeignKey(x => x.KeyVersion)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<ImportJob>(entity =>
+        {
+            entity.Property(x => x.FileType).HasMaxLength(16);
+            entity.Property(x => x.Status).HasMaxLength(32);
+            entity.HasOne<AppUser>()
+                .WithMany()
+                .HasForeignKey(x => x.CreatedBy)
                 .OnDelete(DeleteBehavior.Restrict);
         });
     }

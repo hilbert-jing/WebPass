@@ -145,8 +145,10 @@ public sealed class IndexModel(ServerAssetService assetService, PingService ping
         public string? OperatingSystemVersion { get; set; }
         public string? DatabaseVersion { get; set; }
         public string? Notes { get; set; }
+        [DataType(DataType.Password)]
+        public string? Password { get; set; }
 
         public ServerAssetInput ToInput() => new(BusinessIp, Location, AliveStatus, ComputerName, SystemName,
-            OperatingSystemVersion, DatabaseVersion, Notes);
+            OperatingSystemVersion, DatabaseVersion, Notes, Password);
     }
 }

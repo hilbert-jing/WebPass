@@ -3,6 +3,7 @@ using System.Net.Sockets;
 using Microsoft.EntityFrameworkCore;
 using WebPass.Web.Application.Authorization;
 using WebPass.Web.Application.Networking;
+using WebPass.Web.Application.Secrets;
 using WebPass.Web.Data;
 using WebPass.Web.Domain.Entities;
 using WebPass.Web.Infrastructure.Auditing;
@@ -13,7 +14,8 @@ namespace WebPass.Web.Application.Assets;
 public sealed class ServerAssetService(
     WebPassDbContext db,
     PermissionAuthorizationHandler permissions,
-    AuditWriter auditWriter)
+    AuditWriter auditWriter,
+    ISecretCipher? secretCipher = null)
 {
     public async Task<ServerAsset> CreateAsync(ServerAssetInput input, Guid actorUserId, CancellationToken ct)
     {
@@ -39,9 +41,11 @@ public sealed class ServerAssetService(
         };
         // SQL Server populates rowversion. This gives the in-memory provider a usable concurrency token too.
         if (asset.RowVersion.Length == 0) asset.RowVersion = [1];
+        var secret = await EncryptSecretAsync(asset.Id, input.Password, actorUserId, ct);
 
         await using var transaction = db.Database.IsRelational() ? await db.Database.BeginTransactionAsync(ct) : null;
         db.ServerAssets.Add(asset);
+        if (secret is not null) db.ServerSecrets.Add(secret);
         await db.SaveChangesAsync(ct);
         await WriteAuditAsync("AssetCreate", asset, actorUserId, ct);
         if (transaction is not null) await transaction.CommitAsync(ct);
@@ -57,6 +61,7 @@ public sealed class ServerAssetService(
         var (address, canonicalIp, number) = ParseAddress(input.BusinessIp);
         var subnet = await FindEnabledContainingSubnetAsync(address, ct);
         await EnsureActiveIpAvailableAsync(canonicalIp, assetId, ct);
+        var secret = await EncryptSecretAsync(asset.Id, input.Password, actorUserId, ct);
 
         asset.SubnetId = subnet.Id;
         asset.BusinessIp = canonicalIp;
@@ -71,6 +76,7 @@ public sealed class ServerAssetService(
         asset.UpdatedAt = DateTimeOffset.UtcNow;
         asset.UpdatedBy = actorUserId;
 
+        if (secret is not null) await UpsertSecretAsync(secret, ct);
         await SaveAndAuditAsync("AssetEdit", asset, actorUserId, ct);
         return asset;
     }
@@ -397,6 +403,48 @@ public sealed class ServerAssetService(
 
         await WriteAuditAsync(action, asset, actorUserId, ct);
         if (transaction is not null) await transaction.CommitAsync(ct);
+    }
+
+    private async Task<ServerSecret?> EncryptSecretAsync(
+        Guid assetId,
+        string? password,
+        Guid actorUserId,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(password)) return null;
+        if (secretCipher is null)
+            throw new InvalidOperationException("Secret encryption is unavailable.");
+
+        var envelope = await secretCipher.EncryptAsync(assetId, password, ct);
+        return new ServerSecret
+        {
+            ServerAssetId = assetId,
+            Ciphertext = envelope.Ciphertext,
+            Nonce = envelope.Nonce,
+            AuthenticationTag = envelope.AuthenticationTag,
+            KeyVersion = envelope.KeyVersion,
+            UpdatedAt = DateTimeOffset.UtcNow,
+            UpdatedBy = actorUserId,
+        };
+    }
+
+    private async Task UpsertSecretAsync(ServerSecret replacement, CancellationToken ct)
+    {
+        var existing = await db.ServerSecrets.SingleOrDefaultAsync(
+            x => x.ServerAssetId == replacement.ServerAssetId,
+            ct);
+        if (existing is null)
+        {
+            db.ServerSecrets.Add(replacement);
+            return;
+        }
+
+        existing.Ciphertext = replacement.Ciphertext;
+        existing.Nonce = replacement.Nonce;
+        existing.AuthenticationTag = replacement.AuthenticationTag;
+        existing.KeyVersion = replacement.KeyVersion;
+        existing.UpdatedAt = replacement.UpdatedAt;
+        existing.UpdatedBy = replacement.UpdatedBy;
     }
 
     private Task WriteAuditAsync(string action, ServerAsset asset, Guid actorUserId, CancellationToken ct) =>

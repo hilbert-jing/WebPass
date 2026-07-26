@@ -10,7 +10,8 @@ public sealed record ServerAssetInput(
     string SystemName,
     string? OperatingSystemVersion,
     string? DatabaseVersion,
-    string? Notes);
+    string? Notes,
+    string? Password = null);
 
 public sealed class ServerAssetConcurrencyException : InvalidOperationException
 {

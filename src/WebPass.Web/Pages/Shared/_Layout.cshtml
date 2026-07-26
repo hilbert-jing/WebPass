@@ -8,6 +8,7 @@
         Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out userId);
     var canViewAssets = hasUser && await PermissionAuthorization.IsAllowedAsync(userId, PermissionCode.AssetView, Context.RequestAborted);
     var canManageSubnets = hasUser && await PermissionAuthorization.IsAllowedAsync(userId, PermissionCode.SubnetManage, Context.RequestAborted);
+    var canImport = hasUser && await PermissionAuthorization.IsAllowedAsync(userId, PermissionCode.ImportData, Context.RequestAborted);
     var canViewAudit = hasUser && await PermissionAuthorization.IsAllowedAsync(userId, PermissionCode.AuditView, Context.RequestAborted);
     var isAdministrator = hasUser && await PermissionAuthorization.IsAdministratorAsync(userId, Context.RequestAborted);
 }
@@ -21,6 +22,7 @@
     <nav aria-label="Main navigation">
         @if (canViewAssets) { <a href="/servers">Servers</a> }
         @if (canManageSubnets) { <a href="/subnets">Subnets</a> }
+        @if (canImport) { <a href="/imports">Import</a> }
         @if (canViewAudit) { <a href="/audit">Audit</a> }
         @if (isAdministrator) { <a href="/admin/users">Users</a> }
         @if (!hasUser) { <a href="/login">Login</a> }

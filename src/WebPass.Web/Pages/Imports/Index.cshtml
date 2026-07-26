@@ -1,0 +1,41 @@
+@page "/imports"
+@model WebPass.Web.Pages.Imports.IndexModel
+@{
+    ViewData["Title"] = "Import servers";
+}
+
+<h1>Import servers</h1>
+<p>Upload an IPv4 inventory in CSV or XLSX format. Maximum 10 MB and 5,000 data rows.</p>
+<div asp-validation-summary="ModelOnly"></div>
+<form method="post" enctype="multipart/form-data" asp-page-handler="Preview">
+    <label asp-for="Upload"></label>
+    <input asp-for="Upload" type="file" accept=".csv,.xlsx" />
+    <button type="submit">Preview import</button>
+</form>
+
+@if (Model.Preview is { } preview)
+{
+    <section>
+        <h2>Preview</h2>
+        <p>Total: @preview.TotalRows</p>
+        <p>Create: @preview.CreateCount</p>
+        <p>Update: @preview.UpdateCount</p>
+        <p>Skip: @preview.SkipCount</p>
+        @if (preview.Errors.Count > 0)
+        {
+            <ul>
+            @foreach (var error in preview.Errors)
+            {
+                <li>Row @error.RowNumber, @error.Field: @error.Message</li>
+            }
+            </ul>
+        }
+        @if (!preview.HasBlockingErrors)
+        {
+            <form method="post" asp-page-handler="Commit">
+                <input type="hidden" name="previewId" value="@preview.Id" />
+                <button type="submit">Commit import</button>
+            </form>
+        }
+    </section>
+}
