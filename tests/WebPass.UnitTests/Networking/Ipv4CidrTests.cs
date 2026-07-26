@@ -43,7 +43,8 @@ public sealed class Ipv4CidrTests
     {
         var cidr = Ipv4Cidr.Parse("192.168.4.0/29");
 
-        var addresses = cidr.EnumerateUsableAddresses(skip: 2, take: 3).Select(x => x.ToString());
+        IReadOnlyList<IPAddress> addressPage = cidr.EnumerateUsableAddresses(skip: 2, take: 3);
+        var addresses = addressPage.Select(x => x.ToString());
 
         Assert.Equal(["192.168.4.3", "192.168.4.4", "192.168.4.5"], addresses);
     }

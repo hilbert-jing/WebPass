@@ -59,8 +59,8 @@ public sealed class Ipv4Cidr
         return total <= 2 ? 0 : total - 2;
     }
 
-    public IEnumerable<IPAddress> EnumerateUsableAddresses(int skip, int take)
-        => EnumerateUsableAddresses((long)skip, take);
+    public IReadOnlyList<IPAddress> EnumerateUsableAddresses(int skip, int take)
+        => EnumerateUsableAddresses((long)skip, take).ToArray();
 
     public IEnumerable<IPAddress> EnumerateUsableAddresses(long skip, int take)
     {
