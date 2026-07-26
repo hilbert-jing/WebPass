@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add server-password encryption and reveal, secure import/export, administrator backup/recovery, and IIS production hardening to the completed core platform.
+**Goal:** Add server-password encryption and reveal, secure import/export including a separately reauthenticated administrator password XLSX, and IIS production hardening to the completed core platform.
 
 **Architecture:** The application remains a single ASP.NET Core 10 application. A versioned AES data key is wrapped by a Windows certificate; password reveal needs a server-side reauthentication grant; imported passwords are encrypted before preview state is retained. IIS is the HTTPS boundary and SQL Server stays local to the server.
 
@@ -16,7 +16,7 @@
 - Password reveal requires `SecretReveal` permission, current-password reauthentication, a 5-minute grant and 30-second browser display.
 - Import supports IPv4 `.xlsx` and `.csv` only, up to 10 MB and 5,000 rows, with atomic commit.
 - Ordinary exports contain no passwords or cryptographic material.
-- Backup and restore are administrator-only.
+- Ordinary export supports CSV/XLSX; the separately authorized administrator password export supports XLSX only.
 - Each task starts with a failing test and ends with a focused commit.
 
 ---
@@ -25,9 +25,9 @@
 
 - `src/WebPass.Web/Application/Secrets/`: encryption, reauthentication and reveal contracts.
 - `src/WebPass.Web/Infrastructure/Secrets/`: Windows certificate access and AES-GCM.
-- `src/WebPass.Web/Application/Importing/`, `Exporting/`, `Backups/`: file and recovery use cases.
+- `src/WebPass.Web/Application/Importing/`, `Exporting/`: file use cases.
 - `src/WebPass.Web/Pages/Secrets/`, `Imports/`, `Exports/`, `Admin/`: protected handlers.
-- `docs/deployment/`: IIS, certificate and recovery instructions.
+- `docs/deployment/`: IIS, certificate and acceptance instructions.
 
 ### Task 1: Add certificate-backed envelope encryption and key rotation
 
@@ -199,67 +199,326 @@ git add src/WebPass.Web/Application/Assets src/WebPass.Web/Application/Importing
 git commit -m "feat: add encrypted asset import"
 ```
 
-### Task 4: Add secret-free ordinary exports and administrator backup/recovery
+### Task 4: Add secret-free ordinary exports and administrator password XLSX export
+
+The approved design is
+`docs/superpowers/specs/2026-07-27-webpass-admin-password-export-design.md`.
+Database backup, restore and encrypted backup packages are removed from scope.
+
+#### Task 4.1: Add export models, sanitizer and in-memory document writer
 
 **Files:**
-- Create: `src/WebPass.Web/Application/Exporting/AssetExportService.cs`
-- Create: `src/WebPass.Web/Pages/Exports/Index.cshtml`
-- Create: `src/WebPass.Web/Pages/Exports/Index.cshtml.cs`
-- Create: `src/WebPass.Web/Application/Backups/BackupService.cs`
-- Create: `src/WebPass.Web/Pages/Admin/Backups.cshtml`
-- Create: `src/WebPass.Web/Pages/Admin/Backups.cshtml.cs`
+- Create: `src/WebPass.Web/Application/Exporting/ExportModels.cs`
+- Create: `src/WebPass.Web/Application/Exporting/SpreadsheetCellSanitizer.cs`
+- Create: `src/WebPass.Web/Infrastructure/Exporting/ExportDocumentWriter.cs`
 - Test: `tests/WebPass.UnitTests/Exporting/SpreadsheetCellSanitizerTests.cs`
-- Test: `tests/WebPass.IntegrationTests/Backups/BackupTests.cs`
+- Test: `tests/WebPass.UnitTests/Exporting/ExportDocumentWriterTests.cs`
 
 **Interfaces:**
-- Produces `Task<ExportFile> ExportAsync(ExportFormat format, ServerListQuery query, Guid actorId, CancellationToken ct)`.
-- Produces `Task<BackupFile> CreateAsync(string passphrase, Guid administratorId, CancellationToken ct)`, `PreviewAsync`, and `RestoreAsync`.
+- Produces `enum ExportFormat { Csv, Xlsx }`.
+- Produces `sealed record ExportFile(byte[] Content, string ContentType, string FileName)`.
+- Produces `sealed record ExportRow(string BusinessIp, string Location, string AliveStatus, string ComputerName, string SystemName, string? OperatingSystemVersion, string? DatabaseVersion, string? Notes)`.
+- Produces `sealed record PasswordExportRow(ExportRow Asset, string? Password)`.
+- Produces `static string SpreadsheetCellSanitizer.Sanitize(string? value)`.
+- Produces `ExportFile ExportDocumentWriter.WriteOrdinary(IReadOnlyList<ExportRow> rows, ExportFormat format)`.
+- Produces `ExportFile ExportDocumentWriter.WritePasswords(IReadOnlyList<PasswordExportRow> rows)`.
 
-- [ ] **Step 1: Write failing export and backup tests**
+- [ ] **Step 1: Write failing sanitizer tests**
 
 ```csharp
 [Theory]
 [InlineData("=2+2", "'=2+2")]
 [InlineData("+SUM(A1:A2)", "'+SUM(A1:A2)")]
-public void Escapes_spreadsheet_formulas(string source, string expected) =>
+[InlineData("-1+2", "'-1+2")]
+[InlineData("@SUM(A1:A2)", "'@SUM(A1:A2)")]
+[InlineData("server-01", "server-01")]
+[InlineData(null, "")]
+public void Escapes_formula_prefixes(string? source, string expected) =>
     Assert.Equal(expected, SpreadsheetCellSanitizer.Sanitize(source));
-
-[Fact]
-public async Task Wrong_backup_passphrase_cannot_open_package()
-{
-    var file = await backups.CreateAsync("correct horse battery staple", adminId, default);
-    await Assert.ThrowsAsync<CryptographicException>(() =>
-        backups.PreviewAsync(file.OpenRead(), "wrong", adminId, default));
-}
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [ ] **Step 2: Run sanitizer tests to verify they fail**
 
 Run: `dotnet test tests/WebPass.UnitTests --filter FullyQualifiedName~SpreadsheetCellSanitizerTests`
 
-Expected: FAIL because export code does not exist.
+Expected: FAIL because `SpreadsheetCellSanitizer` does not exist.
 
-- [ ] **Step 3: Implement export and backup boundaries**
+- [ ] **Step 3: Implement the sanitizer**
 
 ```csharp
-public sealed record ExportRow(string Location, string AliveStatus, string ComputerName,
-    string SystemName, string BusinessIp, string? OperatingSystemVersion,
-    string? DatabaseVersion, string? Notes);
+public static string Sanitize(string? value)
+{
+    if (string.IsNullOrEmpty(value)) return string.Empty;
+    return value[0] is '=' or '+' or '-' or '@' ? $"'{value}" : value;
+}
 ```
 
-Export only `ExportRow`, never load `ServerSecret`, wrapped keys, hashes or sessions. Require `ExportData`; audit format, filters and count. For backup, require administrator and reauthentication; derive a package key from random salt plus Argon2id passphrase; encrypt serialized ciphertext records using AES-GCM. Preview is read-only; restore is a transaction and audits one recovery action.
+- [ ] **Step 4: Write failing document-shape tests**
 
-- [ ] **Step 4: Run tests**
+```csharp
+[Fact]
+public void Ordinary_xlsx_has_exact_secret_free_headers()
+{
+    var file = writer.WriteOrdinary([Row(notes: "=2+2")], ExportFormat.Xlsx);
+    using var book = new XLWorkbook(new MemoryStream(file.Content));
+    var sheet = book.Worksheet(1);
+    Assert.Equal(8, sheet.LastColumnUsed()!.ColumnNumber());
+    Assert.Equal("Notes", sheet.Cell(1, 8).GetString());
+    Assert.Equal("'=2+2", sheet.Cell(2, 8).GetString());
+}
 
-Run: `dotnet test tests/WebPass.IntegrationTests --filter FullyQualifiedName~BackupTests`
+[Fact]
+public void Password_xlsx_adds_only_sanitized_password_column()
+{
+    var file = writer.WritePasswords([new PasswordExportRow(Row(), "=secret")]);
+    using var book = new XLWorkbook(new MemoryStream(file.Content));
+    Assert.Equal("Password", book.Worksheet(1).Cell(1, 9).GetString());
+    Assert.Equal("'=secret", book.Worksheet(1).Cell(2, 9).GetString());
+}
+```
 
-Expected: PASS for no secret columns, formula escaping, wrong passphrase rejection, administrator denial, preview and atomic restore.
+- [ ] **Step 5: Run writer tests to verify they fail**
 
-- [ ] **Step 5: Commit**
+Run: `dotnet test tests/WebPass.UnitTests --filter FullyQualifiedName~ExportDocumentWriterTests`
+
+Expected: FAIL because the models and writer do not exist.
+
+- [ ] **Step 6: Implement models and writers**
+
+Use the exact interfaces above. CSV uses UTF-8 and RFC 4180 quoting. XLSX uses
+ClosedXML, exact eight ordinary headers, and an additional `Password` header only
+for the administrator workbook. Pass every data cell through the sanitizer. Return
+`stream.ToArray()` with `.csv`/`text/csv; charset=utf-8` or
+`.xlsx`/`application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`.
+Do not create temporary files, formulas or hyperlinks.
+
+- [ ] **Step 7: Run unit tests**
+
+Run: `dotnet test tests/WebPass.UnitTests --filter FullyQualifiedName~Exporting`
+
+Expected: PASS for formula escaping, CSV quoting and exact workbook columns.
+
+- [ ] **Step 8: Commit**
 
 ```bash
-git add src/WebPass.Web/Application/Exporting src/WebPass.Web/Application/Backups src/WebPass.Web/Pages/Exports src/WebPass.Web/Pages/Admin tests
-git commit -m "feat: add safe exports and encrypted backups"
+git add src/WebPass.Web/Application/Exporting src/WebPass.Web/Infrastructure/Exporting tests/WebPass.UnitTests/Exporting
+git commit -m "feat: add safe export document writers"
+```
+
+#### Task 4.2: Add secret-free export service and page
+
+**Files:**
+- Create: `src/WebPass.Web/Application/Exporting/AssetExportQuery.cs`
+- Create: `src/WebPass.Web/Application/Exporting/AssetExportService.cs`
+- Create: `src/WebPass.Web/Pages/Exports/Index.cshtml`
+- Create: `src/WebPass.Web/Pages/Exports/Index.cshtml.cs`
+- Modify: `src/WebPass.Web/Pages/Shared/_Layout.cshtml`
+- Modify: `src/WebPass.Web/Program.cs`
+- Test: `tests/WebPass.IntegrationTests/Exporting/AssetExportTests.cs`
+- Test: `tests/WebPass.IntegrationTests/Exporting/ExportPageTests.cs`
+
+**Interfaces:**
+- Produces `IQueryable<ServerAsset> AssetExportQuery.Build(WebPassDbContext db, ServerListQuery query)`.
+- Produces `Task<ExportFile> AssetExportService.ExportAsync(ExportFormat format, ServerListQuery query, Guid actorId, CancellationToken ct)`.
+- Consumes `PermissionAuthorizationHandler`, `ExportDocumentWriter`, `AuditWriter`, and `PermissionCode.ExportData`.
+
+- [ ] **Step 1: Write failing service tests**
+
+```csharp
+[Fact]
+public async Task Ordinary_export_requires_permission_and_has_no_secret_columns()
+{
+    await Assert.ThrowsAsync<UnauthorizedAccessException>(
+        () => denied.ExportAsync(ExportFormat.Xlsx, new(), deniedUserId, default));
+    var file = await allowed.ExportAsync(
+        ExportFormat.Xlsx, new ServerListQuery(Search: "server-01"), exporterId, default);
+    using var book = new XLWorkbook(new MemoryStream(file.Content));
+    var headers = book.Worksheet(1).Row(1).CellsUsed().Select(x => x.GetString());
+    Assert.DoesNotContain("Password", headers);
+    Assert.DoesNotContain("Ciphertext", headers);
+}
+```
+
+Also test `Search`, `SubnetId`, and `Status`; exclusion of archived/generated pool
+rows; and an `AssetExport` audit containing only `format`, `search`, `subnetId`,
+`status`, and `rowCount`.
+
+- [ ] **Step 2: Run service tests to verify they fail**
+
+Run: `dotnet test tests/WebPass.IntegrationTests --filter FullyQualifiedName~AssetExportTests`
+
+Expected: FAIL because the service and query do not exist.
+
+- [ ] **Step 3: Implement the shared active-asset query**
+
+Reject `IncludeArchived` or `PoolMode` with `ArgumentException`; ignore paging
+fields. Start with `ServerAssets.AsNoTracking().Where(x => !x.IsArchived)`, apply
+the three approved filters with the same matching fields as
+`ServerAssetService.ListAsync`, and order by `BusinessIpNumber`.
+
+- [ ] **Step 4: Implement the ordinary export service**
+
+Check `ExportData` before querying. Project directly to `ExportRow`; never reference
+`ServerSecrets`, keys, users, hashes, sessions, or audit logs. Generate the selected
+format in memory and write one secret-free `AssetExport` audit. Audit denial/failure
+without rows, secrets, or exception text; do not convert cancellation to failure.
+
+- [ ] **Step 5: Run service tests**
+
+Run: `dotnet test tests/WebPass.IntegrationTests --filter FullyQualifiedName~AssetExportTests`
+
+Expected: PASS for authorization, filters, projection, formats and audit payload.
+
+- [ ] **Step 6: Write failing page tests**
+
+```csharp
+[Fact]
+public async Task Download_requires_antiforgery() =>
+    Assert.Equal(HttpStatusCode.BadRequest,
+        (await client.PostAsync("/exports?handler=Download", new FormUrlEncodedContent([]))).StatusCode);
+
+[Theory]
+[InlineData("Csv", "text/csv")]
+[InlineData("Xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")]
+public async Task Download_is_a_no_store_attachment(string format, string contentType)
+{
+    using var response = await PostWithAntiforgeryAsync("/exports?handler=Download", ("Format", format));
+    Assert.Equal(contentType, response.Content.Headers.ContentType!.MediaType);
+    Assert.Contains("attachment", response.Content.Headers.ContentDisposition!.DispositionType);
+    Assert.Contains("no-store", response.Headers.CacheControl!.ToString());
+}
+```
+
+- [ ] **Step 7: Implement and test the ordinary export page**
+
+Use `[Authorize(Policy = PermissionCode.ExportData)]`, a POST download handler,
+bound `ServerListQuery`, and CSV/XLSX selector. Set `Cache-Control: no-store` and
+`Pragma: no-cache`, then return `File(file.Content, file.ContentType,
+file.FileName)`. Register `ExportDocumentWriter` and `AssetExportService` as scoped services and show the navigation entry only
+when `ExportData` is allowed.
+
+Run: `dotnet test tests/WebPass.IntegrationTests --filter FullyQualifiedName~ExportPageTests`
+
+Expected: PASS for authorization, antiforgery, both formats and response headers.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add src/WebPass.Web/Application/Exporting src/WebPass.Web/Pages/Exports src/WebPass.Web/Pages/Shared/_Layout.cshtml src/WebPass.Web/Program.cs tests/WebPass.IntegrationTests/Exporting
+git commit -m "feat: add secret-free inventory exports"
+```
+
+#### Task 4.3: Add reauthenticated administrator password XLSX
+
+**Files:**
+- Create: `src/WebPass.Web/Application/Exporting/AdministratorPasswordExportService.cs`
+- Create: `src/WebPass.Web/Pages/Admin/PasswordExport.cshtml`
+- Create: `src/WebPass.Web/Pages/Admin/PasswordExport.cshtml.cs`
+- Modify: `src/WebPass.Web/Pages/Shared/_Layout.cshtml`
+- Modify: `src/WebPass.Web/Program.cs`
+- Test: `tests/WebPass.IntegrationTests/Exporting/AdministratorPasswordExportTests.cs`
+- Test: `tests/WebPass.IntegrationTests/Exporting/AdministratorPasswordExportPageTests.cs`
+
+**Interfaces:**
+- Produces `Task<ExportFile> AdministratorPasswordExportService.ExportAsync(ServerListQuery query, Guid administratorId, CancellationToken ct)`.
+- Consumes `IsAdministratorAsync`, `IReauthenticationGrantStore`, `IAuthenticationSessionFingerprint`, `ISecretCipher`, `AssetExportQuery`, `ExportDocumentWriter`, and `AuditWriter`.
+- Page uses `PermissionCode.AdministratorPolicy` and XLSX only.
+
+- [ ] **Step 1: Write failing service boundary tests**
+
+```csharp
+[Fact]
+public async Task Password_export_requires_admin_and_current_session_grant()
+{
+    await Assert.ThrowsAsync<UnauthorizedAccessException>(
+        () => service.ExportAsync(new(), ordinaryUserId, default));
+    await Assert.ThrowsAsync<UnauthorizedAccessException>(
+        () => service.ExportAsync(new(), administratorId, default));
+    await grants.StoreAsync(new ReauthenticationGrant(
+        administratorId, fingerprint.GetCurrent(), adminRowVersion, now.AddMinutes(5)), default);
+    var file = await service.ExportAsync(new(), administratorId, default);
+    using var book = new XLWorkbook(new MemoryStream(file.Content));
+    Assert.Equal("server-password", book.Worksheet(1).Cell(2, 9).GetString());
+}
+```
+
+Add cases for another session, stale user row version, expired grant, missing
+secret, formula-shaped password, decryption failure, and secret-free denied/failure
+audits.
+
+- [ ] **Step 2: Implement and test the administrator service**
+
+Check administrator status before loading assets or secrets. Load the enabled user
+row version and call `HasValidGrantAsync(administratorId,
+sessionFingerprint.GetCurrent(), administrator.RowVersion, ct)`. Use
+`AssetExportQuery.Build`, left-join optional `ServerSecret`, reconstruct
+`SecretEnvelope`, decrypt with `ISecretCipher`, and pass method-local
+`PasswordExportRow` values to `WritePasswords`. Abort on any failure and audit only
+result, fixed `Xlsx` format, filters and row count.
+
+Run: `dotnet test tests/WebPass.IntegrationTests --filter FullyQualifiedName~AdministratorPasswordExportTests`
+
+Expected: PASS for administrator/grant boundaries, decrypted and empty cells,
+formula escaping, all-or-nothing failure and redacted audits.
+
+- [ ] **Step 3: Write failing page tests**
+
+```csharp
+[Fact]
+public async Task Non_admin_cannot_open_password_export() =>
+    Assert.Equal(HttpStatusCode.Forbidden,
+        (await ordinaryClient.GetAsync("/admin/password-export")).StatusCode);
+
+[Fact]
+public async Task Admin_without_grant_redirects_to_reauthentication()
+{
+    using var response = await PostWithAntiforgeryAsync(
+        administratorClient, "/admin/password-export?handler=Download");
+    Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+    Assert.StartsWith("/secrets/reauthenticate", response.Headers.Location!.OriginalString);
+}
+```
+
+Also test antiforgery, visible plaintext warning, absence of a format selector,
+XLSX content type/file name, `no-store`, and administrator-only navigation.
+
+- [ ] **Step 4: Implement and test the isolated administrator page**
+
+Apply `[Authorize(Policy = PermissionCode.AdministratorPolicy)]`. Display filters
+and the plaintext warning, but no format selector. POST calls the service and
+returns XLSX with `no-store`/`no-cache`. When the administrator lacks a valid grant,
+redirect locally:
+
+```csharp
+return RedirectToPage(
+    "/Secrets/Reauthenticate",
+    new { ReturnUrl = Url.Page("/Admin/PasswordExport") });
+```
+
+Register the administrator service as scoped and show its navigation entry only
+when `IsAdministratorAsync` is true.
+
+Run: `dotnet test tests/WebPass.IntegrationTests --filter FullyQualifiedName~AdministratorPasswordExportPageTests`
+
+Expected: PASS for admin policy, reauthentication redirect, XLSX-only UI,
+antiforgery and cache headers.
+
+- [ ] **Step 5: Run full verification**
+
+```bash
+dotnet test WebPass.sln -c Release --no-restore
+.tools/dotnet-ef migrations has-pending-model-changes --project src/WebPass.Web --startup-project src/WebPass.Web --configuration Release --no-build
+git diff --check
+```
+
+Expected: all tests pass, EF reports no pending model changes, and diff check exits
+0. Do not add a migration.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/WebPass.Web/Application/Exporting/AdministratorPasswordExportService.cs src/WebPass.Web/Pages/Admin/PasswordExport.cshtml src/WebPass.Web/Pages/Admin/PasswordExport.cshtml.cs src/WebPass.Web/Pages/Shared/_Layout.cshtml src/WebPass.Web/Program.cs tests/WebPass.IntegrationTests/Exporting
+git commit -m "feat: add administrator password export"
 ```
 
 ### Task 5: Harden production hosting and verify acceptance
@@ -271,7 +530,6 @@ git commit -m "feat: add safe exports and encrypted backups"
 - Modify: `src/WebPass.Web/Program.cs`
 - Create: `docs/deployment/windows-server-iis.md`
 - Create: `docs/deployment/certificates-and-key-recovery.md`
-- Create: `docs/deployment/backup-restore-runbook.md`
 - Create: `docs/deployment/acceptance-test-record.md`
 - Create: `scripts/Initialize-WebPass.ps1`
 - Test: `tests/WebPass.IntegrationTests/Security/ProductionSecurityTests.cs`
@@ -325,6 +583,6 @@ git commit -m "docs: add secure IIS deployment runbooks"
 
 ## Self-Review
 
-- Coverage: Tasks 1-5 implement encryption, key rotation, reauthentication, short-lived reveal, online encrypted updates, memory-only import staging, safe export, administrator backup/recovery, IIS hardening and acceptance evidence.
-- Consistency: `SecretEnvelope`, `ReauthenticationGrant`, `ImportPreview`, `ExportRow` and the backup methods are defined before callers.
+- Coverage: Tasks 1-5 implement encryption, key rotation, reauthentication, short-lived reveal, online encrypted updates, memory-only import staging, secret-free export, separately authorized administrator password XLSX export, IIS hardening and acceptance evidence.
+- Consistency: `SecretEnvelope`, `ReauthenticationGrant`, `ImportPreview`, `ExportRow`, `PasswordExportRow` and both export services are defined before callers.
 - Security: each source of server-password plaintext has an explicit time, memory, authorization and logging boundary.
