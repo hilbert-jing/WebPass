@@ -11,6 +11,8 @@ public sealed class WebPassDbContext(DbContextOptions<WebPassDbContext> options)
     public DbSet<ServerAsset> ServerAssets => Set<ServerAsset>();
     public DbSet<PingResult> PingResults => Set<PingResult>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<DataEncryptionKey> DataEncryptionKeys => Set<DataEncryptionKey>();
+    public DbSet<ServerSecret> ServerSecrets => Set<ServerSecret>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -67,6 +69,29 @@ public sealed class WebPassDbContext(DbContextOptions<WebPassDbContext> options)
             entity.Property(x => x.Result).HasMaxLength(64);
             entity.Property(x => x.SourceIp).HasMaxLength(45);
             entity.Property(x => x.CorrelationId).HasMaxLength(128);
+        });
+
+        builder.Entity<DataEncryptionKey>(entity =>
+        {
+            entity.HasKey(x => x.KeyVersion);
+            entity.Property(x => x.KeyVersion).ValueGeneratedNever();
+            entity.Property(x => x.WrappedKey).HasMaxLength(1024);
+            entity.Property(x => x.CertificateThumbprint).HasMaxLength(128);
+            entity.Property(x => x.RowVersion).IsRowVersion();
+            entity.HasIndex(x => x.RetiredAt).IsUnique().HasFilter("[RetiredAt] IS NULL");
+        });
+
+        builder.Entity<ServerSecret>(entity =>
+        {
+            entity.HasKey(x => x.ServerAssetId);
+            entity.Property(x => x.Ciphertext).HasMaxLength(4096);
+            entity.Property(x => x.Nonce).HasMaxLength(12).IsFixedLength();
+            entity.Property(x => x.AuthenticationTag).HasMaxLength(16).IsFixedLength();
+            entity.Property(x => x.RowVersion).IsRowVersion();
+            entity.HasOne(x => x.ServerAsset).WithOne().HasForeignKey<ServerSecret>(x => x.ServerAssetId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.DataEncryptionKey).WithMany(x => x.ServerSecrets).HasForeignKey(x => x.KeyVersion)
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

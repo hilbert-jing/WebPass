@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using WebPass.Web.Application.Authorization;
 using WebPass.Web.Application.Assets;
 using WebPass.Web.Application.Ping;
+using WebPass.Web.Application.Secrets;
 using WebPass.Web.Application.Subnets;
 using WebPass.Web.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -13,6 +14,7 @@ using WebPass.Web.Configuration;
 using WebPass.Web.Infrastructure.Auditing;
 using WebPass.Web.Infrastructure.Identity;
 using WebPass.Web.Infrastructure.Networking;
+using WebPass.Web.Infrastructure.Secrets;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -49,6 +51,8 @@ builder.Services.AddOptions<WebPassOptions>()
     .BindConfiguration(WebPassOptions.SectionName)
     .ValidateOnStart();
 builder.Services.AddSingleton<IValidateOptions<WebPassOptions>, WebPassOptionsValidator>();
+builder.Services.Configure<SecretEncryptionOptions>(
+    builder.Configuration.GetSection(SecretEncryptionOptions.SectionName));
 builder.Services.AddScoped<IPasswordHasher, Argon2PasswordHasher>();
 builder.Services.AddScoped<AuditWriter>();
 builder.Services.AddScoped<LoginService>();
@@ -58,6 +62,11 @@ builder.Services.AddScoped<ServerAssetService>();
 builder.Services.AddScoped<PingService>();
 builder.Services.AddScoped<IPingTransport, SystemPingTransport>();
 builder.Services.AddScoped<SubnetService>();
+builder.Services.AddSingleton<ICertificateProvider, WindowsCertificateProvider>();
+builder.Services.AddScoped<IDataKeyWrapper, CertificateKeyWrapper>();
+builder.Services.AddScoped<IDataEncryptionKeyProvider, DatabaseDataEncryptionKeyProvider>();
+builder.Services.AddScoped<ISecretCipher, AesGcmSecretCipher>();
+builder.Services.AddScoped<DataKeyRotationService>();
 
 var app = builder.Build();
 app.UseExceptionHandler("/error");

@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using WebPass.Web.Data;
 
@@ -11,9 +12,11 @@ using WebPass.Web.Data;
 namespace WebPass.Web.Data.Migrations
 {
     [DbContext(typeof(WebPassDbContext))]
-    partial class WebPassDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260726064112_AddSecureSecrets")]
+    partial class AddSecureSecrets
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
