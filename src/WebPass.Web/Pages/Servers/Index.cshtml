@@ -10,6 +10,11 @@
 {
     <p role="status">Ping: @pingResult</p>
 }
+@if (Model.CanReveal)
+{
+    <p><a href="/secrets/reauthenticate?returnUrl=%2Fservers">Verify current password</a> before revealing a password.</p>
+    <form id="secret-reveal-antiforgery" hidden>@Html.AntiForgeryToken()</form>
+}
 
 <form method="get">
     <label>Search <input asp-for="Query.Search" /></label>
@@ -49,6 +54,10 @@
             @if (item.IsRegistered && item.AssetId is { } id)
             {
                 @if (Model.CanEdit) { <a asp-page="/Servers/Edit" asp-route-id="@id">Edit</a> }
+                @if (Model.CanReveal) {
+                <button type="button" data-secret-reveal data-asset-id="@id" data-output="secret-@id">Reveal password</button>
+                <output id="secret-@id" data-secret-output hidden></output>
+                }
                 @if (Model.CanPing) {
                 <form method="post" asp-page-handler="Ping">
                     <input type="hidden" name="id" value="@id" />
@@ -100,3 +109,8 @@
         </form>
     }
 </nav>
+
+@if (Model.CanReveal)
+{
+    <script src="/js/secret-reveal.js"></script>
+}

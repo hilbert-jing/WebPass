@@ -15,6 +15,7 @@ using WebPass.Web.Infrastructure.Auditing;
 using WebPass.Web.Infrastructure.Identity;
 using WebPass.Web.Infrastructure.Networking;
 using WebPass.Web.Infrastructure.Secrets;
+using WebPass.Web.Infrastructure.Security;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -56,6 +57,8 @@ builder.Services.Configure<SecretEncryptionOptions>(
 builder.Services.AddScoped<IPasswordHasher, Argon2PasswordHasher>();
 builder.Services.AddScoped<AuditWriter>();
 builder.Services.AddScoped<LoginService>();
+builder.Services.AddMemoryCache();
+builder.Services.AddRateLimiter(SecretRateLimitPolicies.AddTo);
 builder.Services.AddScoped<PermissionAuthorizationHandler>();
 builder.Services.AddScoped<IAuthorizationHandler>(services => services.GetRequiredService<PermissionAuthorizationHandler>());
 builder.Services.AddScoped<ServerAssetService>();
@@ -67,11 +70,16 @@ builder.Services.AddScoped<IDataKeyWrapper, CertificateKeyWrapper>();
 builder.Services.AddScoped<IDataEncryptionKeyProvider, DatabaseDataEncryptionKeyProvider>();
 builder.Services.AddScoped<ISecretCipher, AesGcmSecretCipher>();
 builder.Services.AddScoped<DataKeyRotationService>();
+builder.Services.AddSingleton<IReauthenticationGrantStore, InMemoryReauthenticationGrantStore>();
+builder.Services.AddScoped<IAuthenticationSessionFingerprint, CookieAuthenticationSessionFingerprint>();
+builder.Services.AddScoped<ReauthenticationService>();
+builder.Services.AddScoped<SecretRevealService>();
 
 var app = builder.Build();
 app.UseExceptionHandler("/error");
 
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAuthorization();
 app.MapRazorPages();
 

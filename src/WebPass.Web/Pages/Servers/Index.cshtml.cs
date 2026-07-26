@@ -20,6 +20,7 @@ public sealed class IndexModel(ServerAssetService assetService, PingService ping
     public bool CanArchive { get; private set; }
     public bool CanPing { get; private set; }
     public bool CanMarkAlive { get; private set; }
+    public bool CanReveal { get; private set; }
 
     [BindProperty(SupportsGet = true)]
     public ServerListQuery Query { get; set; } = new();
@@ -110,6 +111,7 @@ public sealed class IndexModel(ServerAssetService assetService, PingService ping
         CanArchive = await AllowedAsync(PermissionCode.AssetArchive, ct);
         CanPing = await AllowedAsync(PermissionCode.PingExecute, ct);
         CanMarkAlive = await AllowedAsync(PermissionCode.StatusMarkAlive, ct);
+        CanReveal = await AllowedAsync(PermissionCode.SecretReveal, ct);
     }
 
     private Task<bool> AllowedAsync(string permission, CancellationToken ct) => permissions.IsAllowedAsync(UserId(), permission, ct);
