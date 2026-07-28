@@ -32,6 +32,18 @@ public sealed class ProductionSecurityTests
     }
 
     [Fact]
+    public async Task Secret_reveal_script_is_served_from_wwwroot()
+    {
+        using var factory = new ProductionSecurityFactory();
+        using var client = factory.CreateHttpsClient();
+
+        using var response = await client.GetAsync("/js/secret-reveal.js");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("text/javascript", response.Content.Headers.ContentType?.MediaType);
+    }
+
+    [Fact]
     public async Task Health_reports_only_application_and_database_availability()
     {
         using var factory = new ProductionSecurityFactory();

@@ -106,6 +106,7 @@ if (!app.Environment.IsDevelopment())
 
 app.UseMiddleware<SecurityHeadersMiddleware>();
 app.UseExceptionHandler("/error");
+app.UseStaticFiles();
 
 app.UseAuthentication();
 app.UseRateLimiter();
