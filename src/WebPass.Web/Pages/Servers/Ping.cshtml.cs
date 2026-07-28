@@ -2,12 +2,15 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.AspNetCore.RateLimiting;
 using WebPass.Web.Application.Authorization;
 using WebPass.Web.Application.Ping;
+using WebPass.Web.Infrastructure.Security;
 
 namespace WebPass.Web.Pages.Servers;
 
 [Authorize(Policy = PermissionCode.PingExecute)]
+[EnableRateLimiting(SecretRateLimitPolicies.Ping)]
 public sealed class PingModel(PingService pingService) : PageModel
 {
     public async Task<IActionResult> OnPostAsync(Guid id, CancellationToken ct)

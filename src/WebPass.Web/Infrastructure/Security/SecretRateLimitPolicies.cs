@@ -6,35 +6,42 @@ namespace WebPass.Web.Infrastructure.Security;
 
 public static class SecretRateLimitPolicies
 {
+    public const string Login = "Login";
     public const string Reauthentication = "SecretReauthentication";
+    public const string Ping = "Ping";
     public const string Reveal = "SecretReveal";
 
     public static void AddTo(RateLimiterOptions options)
     {
         options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+        options.AddPolicy(Login, context =>
+            FixedWindow(context, permitLimit: 5, useUserIdentity: false));
         options.AddPolicy(Reauthentication, context =>
-            FixedWindow(context, permitLimit: 5));
+            FixedWindow(context, permitLimit: 5, useUserIdentity: true));
+        options.AddPolicy(Ping, context =>
+            FixedWindow(context, permitLimit: 5, useUserIdentity: true));
         options.AddPolicy(Reveal, context =>
-            FixedWindow(context, permitLimit: 10));
+            FixedWindow(context, permitLimit: 10, useUserIdentity: true));
     }
 
     private static RateLimitPartition<string> FixedWindow(
         HttpContext context,
-        int permitLimit) =>
+        int permitLimit,
+        bool useUserIdentity) =>
         !HttpMethods.IsPost(context.Request.Method)
-            ? RateLimitPartition.GetNoLimiter($"browse:{PartitionKey(context)}")
+            ? RateLimitPartition.GetNoLimiter($"browse:{PartitionKey(context, useUserIdentity)}")
             : RateLimitPartition.GetFixedWindowLimiter(
-            PartitionKey(context),
-            _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = permitLimit,
-                QueueLimit = 0,
-                Window = TimeSpan.FromMinutes(1),
-                AutoReplenishment = true,
-            });
+                PartitionKey(context, useUserIdentity),
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = permitLimit,
+                    QueueLimit = 0,
+                    Window = TimeSpan.FromMinutes(1),
+                    AutoReplenishment = true,
+                });
 
-    private static string PartitionKey(HttpContext context) =>
-        context.User.FindFirstValue(ClaimTypes.NameIdentifier)
+    private static string PartitionKey(HttpContext context, bool useUserIdentity) =>
+        (useUserIdentity ? context.User.FindFirstValue(ClaimTypes.NameIdentifier) : null)
         ?? context.Connection.RemoteIpAddress?.ToString()
         ?? "unknown";
 }

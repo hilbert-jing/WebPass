@@ -4,10 +4,13 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.AspNetCore.RateLimiting;
 using WebPass.Web.Infrastructure.Identity;
+using WebPass.Web.Infrastructure.Security;
 
 namespace WebPass.Web.Pages;
 
+[EnableRateLimiting(SecretRateLimitPolicies.Login)]
 public sealed class LoginModel(LoginService loginService) : PageModel
 {
     [BindProperty]

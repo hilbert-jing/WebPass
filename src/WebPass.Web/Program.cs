@@ -25,6 +25,11 @@ using WebPass.Web.Infrastructure.Security;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddRazorPages();
+builder.Services.AddHttpsRedirection(options =>
+{
+    options.RedirectStatusCode = StatusCodes.Status307TemporaryRedirect;
+    options.HttpsPort = 443;
+});
 builder.Services.AddAntiforgery();
 builder.Services.Configure<FormOptions>(options =>
 {
@@ -93,6 +98,13 @@ builder.Services.AddScoped<XlsxAssetParser>();
 builder.Services.AddScoped<IImportService, ImportService>();
 
 var app = builder.Build();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
+    app.UseHttpsRedirection();
+}
+
+app.UseMiddleware<SecurityHeadersMiddleware>();
 app.UseExceptionHandler("/error");
 
 app.UseAuthentication();
