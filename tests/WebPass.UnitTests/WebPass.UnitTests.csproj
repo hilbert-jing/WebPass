@@ -18,6 +18,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\WebPass.AdminInit\WebPass.AdminInit.csproj" />
     <ProjectReference Include="..\..\src\WebPass.Web\WebPass.Web.csproj" />
   </ItemGroup>
 </Project>

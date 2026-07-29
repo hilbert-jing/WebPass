@@ -13,6 +13,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WebPass.UnitTests", "tests\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WebPass.IntegrationTests", "tests\WebPass.IntegrationTests\WebPass.IntegrationTests.csproj", "{579C82A8-2550-4E11-A71B-8561C0079183}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WebPass.AdminInit", "src\WebPass.AdminInit\WebPass.AdminInit.csproj", "{2AB73EE4-A509-4A10-A07B-572A6F382B51}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -59,6 +61,18 @@ Global
 		{579C82A8-2550-4E11-A71B-8561C0079183}.Release|x64.Build.0 = Release|Any CPU
 		{579C82A8-2550-4E11-A71B-8561C0079183}.Release|x86.ActiveCfg = Release|Any CPU
 		{579C82A8-2550-4E11-A71B-8561C0079183}.Release|x86.Build.0 = Release|Any CPU
+		{2AB73EE4-A509-4A10-A07B-572A6F382B51}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2AB73EE4-A509-4A10-A07B-572A6F382B51}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2AB73EE4-A509-4A10-A07B-572A6F382B51}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{2AB73EE4-A509-4A10-A07B-572A6F382B51}.Debug|x64.Build.0 = Debug|Any CPU
+		{2AB73EE4-A509-4A10-A07B-572A6F382B51}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{2AB73EE4-A509-4A10-A07B-572A6F382B51}.Debug|x86.Build.0 = Debug|Any CPU
+		{2AB73EE4-A509-4A10-A07B-572A6F382B51}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2AB73EE4-A509-4A10-A07B-572A6F382B51}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2AB73EE4-A509-4A10-A07B-572A6F382B51}.Release|x64.ActiveCfg = Release|Any CPU
+		{2AB73EE4-A509-4A10-A07B-572A6F382B51}.Release|x64.Build.0 = Release|Any CPU
+		{2AB73EE4-A509-4A10-A07B-572A6F382B51}.Release|x86.ActiveCfg = Release|Any CPU
+		{2AB73EE4-A509-4A10-A07B-572A6F382B51}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -67,5 +81,6 @@ Global
 		{B5714B13-2ECB-4BAC-BD48-4F5D379DCCF1} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{38384CF3-D9D2-4880-861F-88E52C5FA8F2} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{579C82A8-2550-4E11-A71B-8561C0079183} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{2AB73EE4-A509-4A10-A07B-572A6F382B51} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal
