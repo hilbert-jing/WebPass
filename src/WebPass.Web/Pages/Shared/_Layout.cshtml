@@ -28,7 +28,16 @@
         @if (canViewAudit) { <a href="/audit">Audit</a> }
         @if (isAdministrator) { <a href="/admin/users">Users</a> }
         @if (isAdministrator) { <a href="/admin/password-export">Password export</a> }
-        @if (!hasUser) { <a href="/login">Login</a> }
+        @if (hasUser)
+        {
+            <form method="post" asp-page="/Logout">
+                <button type="submit">Logout</button>
+            </form>
+        }
+        else
+        {
+            <a href="/login">Login</a>
+        }
     </nav>
     <main>
         @RenderBody()

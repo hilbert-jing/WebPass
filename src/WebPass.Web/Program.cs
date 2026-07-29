@@ -1,3 +1,5 @@
+using System.Globalization;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using WebPass.Web.Application.Authorization;
@@ -21,6 +23,7 @@ using WebPass.Web.Infrastructure.Importing;
 using WebPass.Web.Infrastructure.Networking;
 using WebPass.Web.Infrastructure.Secrets;
 using WebPass.Web.Infrastructure.Security;
+using WebPass.Web.Pages;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -51,9 +54,45 @@ builder.Services
     .AddCookie(options =>
     {
         options.LoginPath = "/login";
+        options.ExpireTimeSpan = TimeSpan.FromMinutes(30);
+        options.SlidingExpiration = true;
         options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
         options.Cookie.HttpOnly = true;
         options.Cookie.SameSite = SameSiteMode.Strict;
+        options.Events.OnValidatePrincipal = async context =>
+        {
+            var value = context.Principal?
+                .FindFirst(LoginModel.SessionStartedClaimType)?
+                .Value;
+            var valid = long.TryParse(
+                value,
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var unixSeconds);
+            DateTimeOffset startedAt = default;
+            if (valid)
+            {
+                try
+                {
+                    startedAt =
+                        DateTimeOffset.FromUnixTimeSeconds(unixSeconds);
+                }
+                catch (ArgumentOutOfRangeException)
+                {
+                    valid = false;
+                }
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            if (!valid
+                || startedAt > now
+                || now - startedAt >= TimeSpan.FromHours(8))
+            {
+                context.RejectPrincipal();
+                await context.HttpContext.SignOutAsync(
+                    CookieAuthenticationDefaults.AuthenticationScheme);
+            }
+        };
         options.Events.OnRedirectToAccessDenied = context =>
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Security.Claims;
 using System.Text;
@@ -15,6 +16,7 @@ using WebPass.Web.Application.Authorization;
 using WebPass.Web.Data;
 using WebPass.Web.Domain.Entities;
 using WebPass.Web.Domain.Enums;
+using WebPass.Web.Pages;
 using Xunit;
 
 namespace WebPass.IntegrationTests.Exporting;
@@ -148,7 +150,15 @@ public sealed class ExportPageTests
                 .GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
                 .Get(CookieAuthenticationDefaults.AuthenticationScheme);
             var identity = new ClaimsIdentity(
-                [new Claim(ClaimTypes.NameIdentifier, _userId.ToString())],
+                [
+                    new Claim(
+                        ClaimTypes.NameIdentifier,
+                        _userId.ToString()),
+                    new Claim(
+                        LoginModel.SessionStartedClaimType,
+                        DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+                            .ToString(CultureInfo.InvariantCulture)),
+                ],
                 CookieAuthenticationDefaults.AuthenticationScheme);
             var ticket = new AuthenticationTicket(
                 new ClaimsPrincipal(identity),

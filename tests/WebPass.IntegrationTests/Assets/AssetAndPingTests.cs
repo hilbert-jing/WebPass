@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Security.Claims;
@@ -20,6 +21,7 @@ using WebPass.Web.Domain.Entities;
 using WebPass.Web.Domain.Enums;
 using WebPass.Web.Infrastructure.Auditing;
 using WebPass.Web.Infrastructure.Authorization;
+using WebPass.Web.Pages;
 using Xunit;
 
 namespace WebPass.IntegrationTests.Assets;
@@ -577,7 +579,17 @@ public sealed class AssetAndPingTests
         {
             using var scope = Services.CreateScope();
             var cookieOptions = scope.ServiceProvider.GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>().Get(CookieAuthenticationDefaults.AuthenticationScheme);
-            var identity = new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())], CookieAuthenticationDefaults.AuthenticationScheme);
+            var identity = new ClaimsIdentity(
+                [
+                    new Claim(
+                        ClaimTypes.NameIdentifier,
+                        user.Id.ToString()),
+                    new Claim(
+                        LoginModel.SessionStartedClaimType,
+                        DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+                            .ToString(CultureInfo.InvariantCulture)),
+                ],
+                CookieAuthenticationDefaults.AuthenticationScheme);
             var ticket = new AuthenticationTicket(new ClaimsPrincipal(identity), CookieAuthenticationDefaults.AuthenticationScheme);
             var client = CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
             client.DefaultRequestHeaders.Add("Cookie", $"{cookieOptions.Cookie.Name}={cookieOptions.TicketDataFormat.Protect(ticket)}");

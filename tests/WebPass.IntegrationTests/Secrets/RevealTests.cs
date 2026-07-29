@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Claims;
@@ -16,6 +17,7 @@ using WebPass.Web.Application.Secrets;
 using WebPass.Web.Data;
 using WebPass.Web.Domain.Entities;
 using WebPass.Web.Infrastructure.Identity;
+using WebPass.Web.Pages;
 using Xunit;
 
 namespace WebPass.IntegrationTests.Secrets;
@@ -228,7 +230,15 @@ public sealed class RevealTests
                 .GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
                 .Get(CookieAuthenticationDefaults.AuthenticationScheme);
             var identity = new ClaimsIdentity(
-                [new Claim(ClaimTypes.NameIdentifier, UserId.ToString())],
+                [
+                    new Claim(
+                        ClaimTypes.NameIdentifier,
+                        UserId.ToString()),
+                    new Claim(
+                        LoginModel.SessionStartedClaimType,
+                        DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+                            .ToString(CultureInfo.InvariantCulture)),
+                ],
                 CookieAuthenticationDefaults.AuthenticationScheme);
             var ticket = new AuthenticationTicket(
                 new ClaimsPrincipal(identity),

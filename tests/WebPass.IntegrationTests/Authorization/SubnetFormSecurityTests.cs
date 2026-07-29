@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Security.Claims;
 using System.Text.RegularExpressions;
@@ -13,6 +14,7 @@ using Microsoft.Extensions.Options;
 using WebPass.Web.Application.Authorization;
 using WebPass.Web.Data;
 using WebPass.Web.Domain.Entities;
+using WebPass.Web.Pages;
 using Xunit;
 
 namespace WebPass.IntegrationTests.Authorization;
@@ -151,7 +153,17 @@ public sealed class SubnetFormSecurityTests
             using var scope = Services.CreateScope();
             var cookieOptions = scope.ServiceProvider.GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
                 .Get(CookieAuthenticationDefaults.AuthenticationScheme);
-            var identity = new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, User.Id.ToString())], CookieAuthenticationDefaults.AuthenticationScheme);
+            var identity = new ClaimsIdentity(
+                [
+                    new Claim(
+                        ClaimTypes.NameIdentifier,
+                        User.Id.ToString()),
+                    new Claim(
+                        LoginModel.SessionStartedClaimType,
+                        DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+                            .ToString(CultureInfo.InvariantCulture)),
+                ],
+                CookieAuthenticationDefaults.AuthenticationScheme);
             var ticket = new AuthenticationTicket(new ClaimsPrincipal(identity), CookieAuthenticationDefaults.AuthenticationScheme);
             var client = CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false, HandleCookies = handleCookies });
             client.DefaultRequestHeaders.Add("Cookie", $"{cookieOptions.Cookie.Name}={cookieOptions.TicketDataFormat.Protect(ticket)}");

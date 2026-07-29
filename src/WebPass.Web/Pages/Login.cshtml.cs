@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Globalization;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -13,6 +14,9 @@ namespace WebPass.Web.Pages;
 [EnableRateLimiting(SecretRateLimitPolicies.Login)]
 public sealed class LoginModel(LoginService loginService) : PageModel
 {
+    public const string SessionStartedClaimType =
+        "webpass:session-started-utc";
+
     [BindProperty]
     public LoginInput Input { get; set; } = new();
 
@@ -36,7 +40,15 @@ public sealed class LoginModel(LoginService loginService) : PageModel
         }
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.NameIdentifier, userId.ToString())],
+            [
+                new Claim(
+                    ClaimTypes.NameIdentifier,
+                    userId.ToString()),
+                new Claim(
+                    SessionStartedClaimType,
+                    DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+                        .ToString(CultureInfo.InvariantCulture)),
+            ],
             CookieAuthenticationDefaults.AuthenticationScheme));
         await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal);
         return Redirect("/servers");
