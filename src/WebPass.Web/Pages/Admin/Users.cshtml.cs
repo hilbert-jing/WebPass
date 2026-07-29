@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Microsoft.Data.SqlClient;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -8,6 +9,7 @@ using WebPass.Web.Data;
 using WebPass.Web.Domain.Entities;
 using WebPass.Web.Infrastructure.Auditing;
 using WebPass.Web.Infrastructure.Authorization;
+using WebPass.Web.Infrastructure.Identity;
 
 namespace WebPass.Web.Pages.Admin;
 
@@ -15,12 +17,149 @@ namespace WebPass.Web.Pages.Admin;
 public sealed class UsersModel(
     WebPassDbContext db,
     PermissionAuthorizationHandler permissions,
-    AuditWriter auditWriter) : PageModel
+    AuditWriter auditWriter,
+    IPasswordHasher passwordHasher) : PageModel
 {
+    private const string DefaultPassword = "abc123";
+
     public IReadOnlyList<AppUser> Users { get; private set; } = [];
     public IReadOnlySet<string> GrantablePermissions => PermissionCode.OrdinaryUserCodes;
 
     public async Task OnGetAsync(CancellationToken ct) => await LoadAsync(ct);
+
+    public async Task<IActionResult> OnPostCreateAsync(
+        string username,
+        CancellationToken ct)
+    {
+        await EnsureAdministratorAsync(ct);
+        var normalizedUsername = username?.Trim() ?? string.Empty;
+        if (normalizedUsername.Length is < 1 or > 128)
+        {
+            ModelState.AddModelError(
+                "username",
+                "Username must contain 1 to 128 characters.");
+            await LoadAsync(ct);
+            return Page();
+        }
+
+        if (await db.Users.AnyAsync(
+                x => x.Username == normalizedUsername,
+                ct))
+        {
+            ModelState.AddModelError(
+                "username",
+                "Username already exists.");
+            await LoadAsync(ct);
+            return Page();
+        }
+
+        var user = new AppUser
+        {
+            Username = normalizedUsername,
+            PasswordHash = passwordHasher.Hash(DefaultPassword),
+            IsAdministrator = false,
+            IsEnabled = true,
+            MustChangePassword = false,
+            FailedLoginCount = 0,
+            LockedUntil = null,
+        };
+
+        await using var transaction = db.Database.IsRelational()
+            ? await db.Database.BeginTransactionAsync(ct)
+            : null;
+        db.Users.Add(user);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException exception)
+            when (exception.InnerException is SqlException
+            {
+                Number: 2601 or 2627,
+            })
+        {
+            db.Entry(user).State = EntityState.Detached;
+            ModelState.AddModelError(
+                "username",
+                "Username already exists.");
+            await LoadAsync(ct);
+            return Page();
+        }
+
+        await auditWriter.WriteAsync(
+            new AuditEntry(
+                UserId(),
+                "UserCreate",
+                "User",
+                user.Id.ToString(),
+                "Success",
+                null,
+                Payload: new Dictionary<string, object?>
+                {
+                    ["username"] = normalizedUsername,
+                }),
+            ct);
+        if (transaction is not null)
+        {
+            await transaction.CommitAsync(ct);
+        }
+
+        return RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnPostResetPasswordAsync(
+        Guid userId,
+        string rowVersion,
+        CancellationToken ct)
+    {
+        await EnsureAdministratorAsync(ct);
+        var user = await db.Users.SingleOrDefaultAsync(
+                x => x.Id == userId,
+                ct)
+            ?? throw new KeyNotFoundException("User not found.");
+        if (user.IsAdministrator)
+        {
+            return BadRequest(
+                "Administrator passwords cannot be reset here.");
+        }
+
+        SetOriginalRowVersion(user, rowVersion);
+        await using var transaction = db.Database.IsRelational()
+            ? await db.Database.BeginTransactionAsync(ct)
+            : null;
+        user.PasswordHash = passwordHasher.Hash(DefaultPassword);
+        user.MustChangePassword = false;
+        user.FailedLoginCount = 0;
+        user.LockedUntil = null;
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return new ObjectResult(
+                "The user was changed by another administrator. Reload and try again.")
+            {
+                StatusCode = StatusCodes.Status409Conflict,
+            };
+        }
+
+        await auditWriter.WriteAsync(
+            new AuditEntry(
+                UserId(),
+                "UserPasswordReset",
+                "User",
+                user.Id.ToString(),
+                "Success",
+                null),
+            ct);
+        if (transaction is not null)
+        {
+            await transaction.CommitAsync(ct);
+        }
+
+        return RedirectToPage();
+    }
 
     public async Task<IActionResult> OnPostSetEnabledAsync(Guid userId, bool isEnabled, string rowVersion, CancellationToken ct)
     {

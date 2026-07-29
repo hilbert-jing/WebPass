@@ -8,6 +8,7 @@ using WebPass.Web.Data;
 using WebPass.Web.Domain.Entities;
 using WebPass.Web.Infrastructure.Auditing;
 using WebPass.Web.Infrastructure.Authorization;
+using WebPass.Web.Infrastructure.Identity;
 using WebPass.Web.Pages.Admin;
 using Xunit;
 
@@ -15,6 +16,232 @@ namespace WebPass.IntegrationTests.Authorization;
 
 public sealed class AdminUsersTests
 {
+    [Fact]
+    public async Task Create_adds_an_enabled_ordinary_user_with_default_password_and_no_permissions()
+    {
+        await using var db = NewDatabase();
+        var administrator = NewUser("administrator", isAdministrator: true);
+        db.Users.Add(administrator);
+        await db.SaveChangesAsync();
+        var model = NewModel(db, administrator.Id);
+
+        var result = await model.OnPostCreateAsync("  operator  ", default);
+
+        Assert.IsType<RedirectToPageResult>(result);
+        var created = await db.Users.SingleAsync(x => x.Username == "operator");
+        Assert.False(created.IsAdministrator);
+        Assert.True(created.IsEnabled);
+        Assert.False(created.MustChangePassword);
+        Assert.Equal(0, created.FailedLoginCount);
+        Assert.Null(created.LockedUntil);
+        Assert.Empty(await db.UserPermissions
+            .Where(x => x.UserId == created.Id)
+            .ToListAsync());
+        Assert.True(new Argon2PasswordHasher()
+            .Verify("abc123", created.PasswordHash));
+        var audit = Assert.Single(db.AuditLogs);
+        Assert.Equal("UserCreate", audit.Action);
+        Assert.DoesNotContain(
+            "abc123",
+            audit.Details ?? string.Empty,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            created.PasswordHash,
+            audit.Details ?? string.Empty,
+            StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Create_rejects_an_empty_username_without_writing(
+        string username)
+    {
+        await using var db = NewDatabase();
+        var administrator = NewUser("administrator", isAdministrator: true);
+        db.Users.Add(administrator);
+        await db.SaveChangesAsync();
+        var model = NewModel(db, administrator.Id);
+
+        var result = await model.OnPostCreateAsync(username, default);
+
+        Assert.IsType<PageResult>(result);
+        Assert.Single(await db.Users.ToListAsync());
+        Assert.Empty(await db.AuditLogs.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Create_rejects_a_username_longer_than_128_characters()
+    {
+        await using var db = NewDatabase();
+        var administrator = NewUser("administrator", isAdministrator: true);
+        db.Users.Add(administrator);
+        await db.SaveChangesAsync();
+        var model = NewModel(db, administrator.Id);
+
+        var result = await model.OnPostCreateAsync(
+            new string('a', 129),
+            default);
+
+        Assert.IsType<PageResult>(result);
+        Assert.Single(await db.Users.ToListAsync());
+        Assert.Empty(await db.AuditLogs.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Create_rejects_a_duplicate_normalized_username()
+    {
+        await using var db = NewDatabase();
+        var administrator = NewUser("administrator", isAdministrator: true);
+        var existing = NewUser("operator");
+        db.Users.AddRange(administrator, existing);
+        await db.SaveChangesAsync();
+        var model = NewModel(db, administrator.Id);
+
+        var result = await model.OnPostCreateAsync(" operator ", default);
+
+        Assert.IsType<PageResult>(result);
+        Assert.Equal(2, await db.Users.CountAsync());
+        Assert.Empty(await db.AuditLogs.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Create_is_not_blocked_by_existing_ordinary_users_or_administrators()
+    {
+        await using var db = NewDatabase();
+        var administrator = NewUser("administrator", isAdministrator: true);
+        db.Users.AddRange(
+            administrator,
+            NewUser("existing-ordinary"),
+            NewUser("existing-administrator", isAdministrator: true));
+        await db.SaveChangesAsync();
+        var model = NewModel(db, administrator.Id);
+
+        var result = await model.OnPostCreateAsync(
+            "new-ordinary",
+            default);
+
+        Assert.IsType<RedirectToPageResult>(result);
+        Assert.Equal(4, await db.Users.CountAsync());
+    }
+
+    [Fact]
+    public async Task Reset_rehashes_default_password_clears_lock_and_preserves_account_shape()
+    {
+        await using var db = NewDatabase();
+        var hasher = new Argon2PasswordHasher();
+        var administrator = NewUser("administrator", isAdministrator: true);
+        var user = NewUser("operator");
+        user.PasswordHash = hasher.Hash("old-password");
+        user.IsEnabled = false;
+        user.MustChangePassword = true;
+        user.FailedLoginCount = 5;
+        user.LockedUntil = DateTimeOffset.UtcNow.AddMinutes(10);
+        user.RowVersion = [1];
+        db.Users.AddRange(administrator, user);
+        db.UserPermissions.Add(new UserPermission
+        {
+            UserId = user.Id,
+            PermissionCode = PermissionCode.AssetView,
+        });
+        await db.SaveChangesAsync();
+        var model = NewModel(db, administrator.Id);
+
+        var result = await model.OnPostResetPasswordAsync(
+            user.Id,
+            Convert.ToBase64String([1]),
+            default);
+
+        Assert.IsType<RedirectToPageResult>(result);
+        var reset = await db.Users
+            .Include(x => x.Permissions)
+            .SingleAsync(x => x.Id == user.Id);
+        Assert.True(hasher.Verify("abc123", reset.PasswordHash));
+        Assert.False(reset.IsEnabled);
+        Assert.False(reset.MustChangePassword);
+        Assert.Equal(0, reset.FailedLoginCount);
+        Assert.Null(reset.LockedUntil);
+        Assert.Equal(
+            [PermissionCode.AssetView],
+            reset.Permissions.Select(x => x.PermissionCode).ToArray());
+        var audit = Assert.Single(db.AuditLogs);
+        Assert.Equal("UserPasswordReset", audit.Action);
+        Assert.DoesNotContain(
+            "abc123",
+            audit.Details ?? string.Empty,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            reset.PasswordHash,
+            audit.Details ?? string.Empty,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Reset_rejects_an_administrator_target()
+    {
+        await using var db = NewDatabase();
+        var administrator = NewUser("administrator", isAdministrator: true);
+        administrator.RowVersion = [1];
+        db.Users.Add(administrator);
+        await db.SaveChangesAsync();
+        var model = NewModel(db, administrator.Id);
+
+        var result = await model.OnPostResetPasswordAsync(
+            administrator.Id,
+            Convert.ToBase64String([1]),
+            default);
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Empty(await db.AuditLogs.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Reset_returns_conflict_for_a_stale_row_version()
+    {
+        await using var db = NewDatabase();
+        var administrator = NewUser("administrator", isAdministrator: true);
+        var user = NewUser("operator");
+        user.RowVersion = [1];
+        db.Users.AddRange(administrator, user);
+        await db.SaveChangesAsync();
+        var originalHash = user.PasswordHash;
+        var model = NewModel(db, administrator.Id);
+
+        var result = await model.OnPostResetPasswordAsync(
+            user.Id,
+            Convert.ToBase64String([9]),
+            default);
+
+        Assert.Equal(
+            StatusCodes.Status409Conflict,
+            Assert.IsType<ObjectResult>(result).StatusCode);
+        db.ChangeTracker.Clear();
+        Assert.Equal(
+            originalHash,
+            (await db.Users.SingleAsync(x => x.Id == user.Id)).PasswordHash);
+        Assert.Empty(await db.AuditLogs.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Ordinary_user_cannot_create_or_reset_users()
+    {
+        await using var db = NewDatabase();
+        var ordinary = NewUser("ordinary");
+        var target = NewUser("target");
+        target.RowVersion = [1];
+        db.Users.AddRange(ordinary, target);
+        await db.SaveChangesAsync();
+        var model = NewModel(db, ordinary.Id);
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(
+            () => model.OnPostCreateAsync("new-user", default));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(
+            () => model.OnPostResetPasswordAsync(
+                target.Id,
+                Convert.ToBase64String([1]),
+                default));
+    }
+
     [Fact]
     public async Task Permission_replacement_records_before_and_after_codes_without_password_data()
     {
@@ -97,7 +324,11 @@ public sealed class AdminUsersTests
 
     private static UsersModel NewModel(WebPassDbContext db, Guid administratorId)
     {
-        var model = new UsersModel(db, new PermissionAuthorizationHandler(db), new AuditWriter(db));
+        var model = new UsersModel(
+            db,
+            new PermissionAuthorizationHandler(db),
+            new AuditWriter(db),
+            new Argon2PasswordHasher());
         model.PageContext = new PageContext { HttpContext = new DefaultHttpContext() };
         model.HttpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim(ClaimTypes.NameIdentifier, administratorId.ToString())], "test"));

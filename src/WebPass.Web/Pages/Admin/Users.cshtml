@@ -5,6 +5,17 @@
 }
 
 <h1>User and permission management</h1>
+<section aria-labelledby="create-user-heading">
+    <h2 id="create-user-heading">Create ordinary user</h2>
+    <form method="post" asp-page-handler="Create">
+        <div asp-validation-summary="All"></div>
+        <label for="username">Username</label>
+        <input id="username" name="username" maxlength="128"
+               autocomplete="off" required />
+        <button type="submit">Create user</button>
+    </form>
+</section>
+
 <table>
     <thead><tr><th>User</th><th>Administrator</th><th>Enabled</th><th>Permissions</th><th>Actions</th></tr></thead>
     <tbody>
@@ -16,6 +27,12 @@
             <td>
                 @if (!user.IsAdministrator)
                 {
+                    <form method="post" asp-page-handler="ResetPassword">
+                        <input type="hidden" name="userId" value="@user.Id" />
+                        <input type="hidden" name="rowVersion"
+                               value="@Convert.ToBase64String(user.RowVersion)" />
+                        <button type="submit">Reset password</button>
+                    </form>
                     <form method="post" asp-page-handler="SetEnabled">
                         <input type="hidden" name="userId" value="@user.Id" />
                         <input type="hidden" name="rowVersion" value="@Convert.ToBase64String(user.RowVersion)" />
