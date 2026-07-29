@@ -33,11 +33,25 @@ dotnet publish src\WebPass.Web -c Release -r win-x64 --self-contained false -o C
 
 Confirm `C:\WebPass\staging\web.config` exists. Configure the production connection string for a database on `localhost` or `localhost\SQLEXPRESS`; do not use a LAN hostname or remote address. Configure `SecretEncryption:CertificateThumbprint` with the data-encryption certificate thumbprint, not the HTTPS certificate thumbprint.
 
-Apply EF migrations using a deployment identity that can alter the WebPass database:
+Build the migration bundle from the same reviewed source commit and place it
+in the staging directory:
 
 ```powershell
-dotnet ef database update --project src\WebPass.Web --startup-project src\WebPass.Web --configuration Release
+.\scripts\Build-WebPassMigrationBundle.ps1 `
+  -OutputPath C:\WebPass\staging\WebPass.Migrations.exe
 ```
+
+Apply migrations using a deployment identity that can alter the WebPass
+database:
+
+```powershell
+C:\WebPass\staging\WebPass.Migrations.exe `
+  --connection "Server=localhost\SQLEXPRESS;Database=WebPass;Integrated Security=True;TrustServerCertificate=True"
+```
+
+Stop deployment if bundle creation or execution fails. Generate a new bundle
+for every reviewed release; do not reuse a bundle from another source
+version. The running WebPass website does not apply migrations automatically.
 
 The runtime IIS application-pool identity should receive only the WebPass database access it needs. Do not leave schema-owner or server-administrator rights on the runtime identity after migration.
 
