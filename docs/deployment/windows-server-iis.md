@@ -64,7 +64,33 @@ Run it again without `-WhatIf` only after the proposed site, application pool, c
 
 The script deliberately does not enable SQL network access, create database administrators, replace existing TLS bindings, or install prerequisites.
 
-## 5. Production checks
+## 5. Create an administrator
+
+Publish the local initialization utility separately:
+
+```powershell
+dotnet publish src\WebPass.AdminInit -c Release -r win-x64 `
+  --self-contained false -o C:\WebPass\AdminInit
+```
+
+Run it locally with a deployment identity that can insert into the WebPass
+database:
+
+```powershell
+C:\WebPass\AdminInit\WebPass.AdminInit.exe `
+  --connection-string "Server=localhost\SQLEXPRESS;Database=WebPass;Integrated Security=True;TrustServerCertificate=True" `
+  --username admin
+```
+
+Enter and confirm the password at the hidden prompts. The command does not
+check whether users or administrators already exist; every successful
+invocation creates another administrator with the requested distinct
+username.
+
+The utility is not required by the running website. Delete
+`C:\WebPass\AdminInit` after use if operators do not need to retain it.
+
+## 6. Production checks
 
 In IIS Manager verify:
 
@@ -76,6 +102,6 @@ In IIS Manager verify:
 
 From a trusted LAN client, verify the browser reports a trusted certificate with no warning. Then open `/health`; it must return only `application` and `database` availability. Complete [acceptance-test-record.md](acceptance-test-record.md).
 
-## 6. Update and rollback
+## 7. Update and rollback
 
 Publish each reviewed release to a new versioned directory. Stop the site, switch the IIS physical path, start the site, and run the acceptance checks. If the application fails, stop the site and restore the previous physical path. Database rollback is a separate operator decision and must not be improvised from an exported XLSX file.
