@@ -223,6 +223,98 @@ public sealed class AssetAndPingTests
     }
 
     [Fact]
+    public async Task Server_create_validation_uses_chinese_required_messages()
+    {
+        using var factory = new ServerPageFactory(NewUser(), PermissionCode.AssetView, PermissionCode.AssetCreate);
+        factory.InitializeData();
+        using var client = factory.CreateAuthenticatedClient();
+        var html = await client.GetStringAsync("/servers");
+        var token = Regex.Match(html, "name=\"__RequestVerificationToken\"[^>]*value=\"([^\"]+)\"").Groups[1].Value;
+
+        var response = await client.PostAsync("/servers?handler=Create", new FormUrlEncodedContent(
+            [new("Input.BusinessIp", ""), new("Input.Location", ""), new("Input.ComputerName", ""),
+             new("Input.SystemName", ""), new("__RequestVerificationToken", token)]));
+        var responseHtml = WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("请输入业务 IP。", responseHtml, StringComparison.Ordinal);
+        Assert.Contains("请输入位置。", responseHtml, StringComparison.Ordinal);
+        Assert.Contains("请输入计算机名。", responseHtml, StringComparison.Ordinal);
+        Assert.Contains("请输入系统名称。", responseHtml, StringComparison.Ordinal);
+        Assert.Contains("data-open", responseHtml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Server_create_service_error_uses_safe_message_without_internal_details()
+    {
+        using var factory = new ServerPageFactory(NewUser(), PermissionCode.AssetView, PermissionCode.AssetCreate);
+        factory.InitializeData();
+        await factory.AddSubnetAsync();
+        await factory.AddAssetAsync("10.0.0.9", "HQ", [1]);
+        using var client = factory.CreateAuthenticatedClient();
+        var html = await client.GetStringAsync("/servers");
+        var token = Regex.Match(html, "name=\"__RequestVerificationToken\"[^>]*value=\"([^\"]+)\"").Groups[1].Value;
+
+        var response = await client.PostAsync("/servers?handler=Create", new FormUrlEncodedContent(
+            [new("Input.BusinessIp", "10.0.0.9"), new("Input.Location", "HQ"), new("Input.AliveStatus", "Unknown"),
+             new("Input.ComputerName", "web-09"), new("Input.SystemName", "Web"), new("__RequestVerificationToken", token)]));
+        var responseHtml = WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("无法登记服务器：请检查 IP、网段和必填信息。", responseHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain("An active server asset already uses this business IP.", responseHtml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Successful_ping_redirect_displays_localized_status_message()
+    {
+        using var factory = new ServerPageFactory(
+            NewUser(),
+            PermissionCode.AssetView,
+            PermissionCode.PingExecute);
+        factory.InitializeData();
+        await factory.AddSubnetAsync();
+        var asset = await factory.AddAssetAsync("10.0.0.9", "HQ", [1]);
+        using var client = factory.CreateAuthenticatedClient();
+        var html = await client.GetStringAsync("/servers");
+        var token = Regex.Match(html, "name=\"__RequestVerificationToken\"[^>]*value=\"([^\"]+)\"").Groups[1].Value;
+
+        var response = await client.PostAsync("/servers?handler=Ping", new FormUrlEncodedContent(
+            [new("id", asset.Id.ToString()), new("__RequestVerificationToken", token)]));
+        var responseHtml = WebUtility.HtmlDecode(
+            await client.GetStringAsync(response.Headers.Location!));
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Contains("Ping 可达 · 12 ms", responseHtml, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("MarkAlive", PermissionCode.StatusMarkAlive, "服务器已标记为存活。")]
+    [InlineData("Archive", PermissionCode.AssetArchive, "服务器已归档。")]
+    public async Task Successful_asset_command_redirect_displays_localized_status_message(
+        string handler,
+        string permission,
+        string expectedMessage)
+    {
+        using var factory = new ServerPageFactory(NewUser(), PermissionCode.AssetView, permission);
+        factory.InitializeData();
+        await factory.AddSubnetAsync();
+        var asset = await factory.AddAssetAsync("10.0.0.9", "HQ", [1]);
+        using var client = factory.CreateAuthenticatedClient();
+        var html = await client.GetStringAsync("/servers");
+        var token = Regex.Match(html, "name=\"__RequestVerificationToken\"[^>]*value=\"([^\"]+)\"").Groups[1].Value;
+
+        var response = await client.PostAsync($"/servers?handler={handler}", new FormUrlEncodedContent(
+            [new("id", asset.Id.ToString()), new("rowVersion", Convert.ToBase64String([1])),
+             new("__RequestVerificationToken", token)]));
+        var responseHtml = WebUtility.HtmlDecode(
+            await client.GetStringAsync(response.Headers.Location!));
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Contains(expectedMessage, responseHtml, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Navigation_shows_only_links_allowed_for_the_current_user()
     {
         using var factory = new ServerPageFactory(NewUser(), PermissionCode.AssetView);
@@ -305,6 +397,7 @@ public sealed class AssetAndPingTests
 
         var createHtml = await client.GetStringAsync("/servers?Input.BusinessIp=10.0.0.1");
         Assert.Contains("value=\"10.0.0.1\"", createHtml, StringComparison.Ordinal);
+        Assert.Contains("data-open", createHtml, StringComparison.Ordinal);
         var token = Regex.Match(createHtml, "name=\"__RequestVerificationToken\"[^>]*value=\"([^\"]+)\"").Groups[1].Value;
         var post = await client.PostAsync("/servers?handler=Create", new FormUrlEncodedContent(
         [new("Input.BusinessIp", "10.0.0.1"), new("Input.Location", "HQ"), new("Input.AliveStatus", "Unknown"),
@@ -616,6 +709,8 @@ public sealed class AssetAndPingTests
             services.RemoveAll<WebPassDbContext>();
             services.RemoveAll<IDbContextOptionsConfiguration<WebPassDbContext>>();
             services.AddDbContext<WebPassDbContext>(options => options.UseInMemoryDatabase(_databaseName));
+            services.RemoveAll<IPingTransport>();
+            services.AddSingleton<IPingTransport, SuccessfulPingTransport>();
         });
     }
 }

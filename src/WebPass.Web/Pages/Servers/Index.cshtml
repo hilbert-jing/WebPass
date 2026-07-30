@@ -1,115 +1,308 @@
 @page "/servers"
+@using WebPass.Web.Domain.Enums
+@using WebPass.Web.Presentation
 @model WebPass.Web.Pages.Servers.IndexModel
 @{
-    ViewData["Title"] = "Servers";
+    ViewData["Title"] = "服务器资产";
+    var openRegistration = Model.CanCreate &&
+        (Request.Method == "POST" || !string.IsNullOrWhiteSpace(Model.Input.BusinessIp));
 }
 
-<h1>Server inventory</h1>
-<div asp-validation-summary="ModelOnly"></div>
-@if (TempData["PingResult"] is string pingResult)
-{
-    <p role="status">Ping: @pingResult</p>
-}
+<header class="page-header">
+    <div>
+        <h1>服务器资产</h1>
+        <p>按网段梳理业务 IP、运行状态与系统信息，并在同一工作区完成日常资产操作。</p>
+    </div>
+    @if (Model.CanCreate)
+    {
+        <button type="button"
+                data-drawer-open="register-server"
+                aria-controls="register-server"
+                aria-expanded="@openRegistration.ToString().ToLowerInvariant()">
+            登记服务器
+        </button>
+    }
+</header>
+
+<div asp-validation-summary="ModelOnly" class="alert-region"></div>
+
 @if (Model.CanReveal)
 {
-    <p><a href="/secrets/reauthenticate?returnUrl=%2Fservers">Verify current password</a> before revealing a password.</p>
+    <p class="form-section">
+        查看密码前需先<a href="/secrets/reauthenticate?returnUrl=%2Fservers">验证当前密码</a>。
+    </p>
     <form id="secret-reveal-antiforgery" hidden>@Html.AntiForgeryToken()</form>
 }
 
-<form method="get">
-    <label>Search <input asp-for="Query.Search" /></label>
-    <label>Subnet <input asp-for="Query.SubnetId" /></label>
-    <label>Status <select asp-for="Query.Status" asp-items="Html.GetEnumSelectList<WebPass.Web.Domain.Enums.AliveStatus>()"><option value="">Any</option></select></label>
-    <label>Include archived <input asp-for="Query.IncludeArchived" /></label>
-    <label>Full address pool <input asp-for="Query.PoolMode" /></label>
+<form method="get" class="command-bar" aria-label="服务器筛选">
+    <div>
+        <label asp-for="Query.Search">搜索</label>
+        <input asp-for="Query.Search" placeholder="IP、位置、计算机或系统" />
+    </div>
+    <div>
+        <label asp-for="Query.SubnetId">网段</label>
+        <select asp-for="Query.SubnetId">
+            <option value="">全部网段</option>
+            @foreach (var subnet in Model.SubnetOptions)
+            {
+                <option value="@subnet.Id">@subnet.Name · @subnet.Cidr</option>
+            }
+        </select>
+    </div>
+    <div>
+        <label asp-for="Query.Status">状态</label>
+        <select asp-for="Query.Status">
+            <option value="">全部状态</option>
+            @foreach (var status in Enum.GetValues<AliveStatus>())
+            {
+                <option value="@status">@UiLabels.ForAliveStatus(status)</option>
+            }
+        </select>
+    </div>
+    <div>
+        <input asp-for="Query.IncludeArchived" />
+        <label asp-for="Query.IncludeArchived">包含已归档</label>
+    </div>
+    <div>
+        <input asp-for="Query.PoolMode" />
+        <label asp-for="Query.PoolMode">显示完整地址池</label>
+    </div>
     <input type="hidden" asp-for="Query.Skip" />
     <input type="hidden" asp-for="Query.Take" />
-    <button type="submit">Filter</button>
+    <button type="submit">应用筛选</button>
 </form>
 
-@if (Model.CanCreate)
+@if (Model.SelectedSubnet is { } selectedSubnet)
 {
-<form method="post" asp-page-handler="Create">
-    <h2>Register server</h2>
-    <label asp-for="Input.BusinessIp"></label><input asp-for="Input.BusinessIp" />
-    <label asp-for="Input.Location"></label><input asp-for="Input.Location" />
-    <label asp-for="Input.AliveStatus"></label><select asp-for="Input.AliveStatus" asp-items="Html.GetEnumSelectList<WebPass.Web.Domain.Enums.AliveStatus>()"></select>
-    <label asp-for="Input.ComputerName"></label><input asp-for="Input.ComputerName" />
-    <label asp-for="Input.SystemName"></label><input asp-for="Input.SystemName" />
-    <label asp-for="Input.OperatingSystemVersion"></label><input asp-for="Input.OperatingSystemVersion" />
-    <label asp-for="Input.DatabaseVersion"></label><input asp-for="Input.DatabaseVersion" />
-    <label asp-for="Input.Notes"></label><textarea asp-for="Input.Notes"></textarea>
-    <label asp-for="Input.Password"></label><input asp-for="Input.Password" autocomplete="new-password" />
-    <button type="submit">Create server</button>
-</form>
+    <section class="form-section" data-ip-rail aria-labelledby="ip-rail-title">
+        <div class="page-header">
+            <div>
+                <h2 id="ip-rail-title">@selectedSubnet.Name</h2>
+                <p class="data-value">@selectedSubnet.Cidr</p>
+            </div>
+            <strong class="data-value">@selectedSubnet.RegisteredCount / @selectedSubnet.UsableAddressCount</strong>
+        </div>
+        <ol aria-label="IP 地址脉络">
+            <li><span>网络地址</span> <strong class="data-value">@selectedSubnet.Cidr.Split('/')[0]</strong></li>
+            <li><span>已登记</span> <strong>@selectedSubnet.RegisteredCount</strong></li>
+            <li><span>可用容量</span> <strong>@selectedSubnet.UsableAddressCount</strong></li>
+        </ol>
+    </section>
 }
 
-<table>
-    <thead><tr><th>Business IP</th><th>Location</th><th>Status</th><th>Computer</th><th>System</th><th>OS version</th><th>DB version</th><th>Notes</th><th>Actions</th></tr></thead>
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>业务 IP</th>
+            <th>位置</th>
+            <th>状态</th>
+            <th>计算机名</th>
+            <th>系统</th>
+            <th>操作系统版本</th>
+            <th>数据库版本</th>
+            <th>备注</th>
+            <th>操作</th>
+        </tr>
+    </thead>
     <tbody>
     @foreach (var item in Model.Results.Items)
     {
+        var statusTone = item.AliveStatus switch
+        {
+            AliveStatus.Alive => "success",
+            AliveStatus.Fault => "danger",
+            AliveStatus.Decommissioned => "warning",
+            _ => "warning",
+        };
         <tr>
-            <td>@item.BusinessIp</td><td>@item.Location</td><td>@item.AliveStatus</td><td>@item.ComputerName</td><td>@item.SystemName</td><td>@item.OperatingSystemVersion</td><td>@item.DatabaseVersion</td><td>@item.Notes</td>
+            <td class="data-value">@item.BusinessIp</td>
+            <td>@(item.Location ?? "—")</td>
+            <td>
+                @if (item.IsRegistered)
+                {
+                    <span class="status-badge" data-status="@statusTone">
+                        @(item.IsArchived ? "已归档 · " : string.Empty)@UiLabels.ForAliveStatus(item.AliveStatus)
+                    </span>
+                }
+                else
+                {
+                    <span class="status-badge">空闲</span>
+                }
+            </td>
+            <td>@(item.ComputerName ?? "—")</td>
+            <td>@(item.SystemName ?? "—")</td>
+            <td>@(item.OperatingSystemVersion ?? "—")</td>
+            <td>@(item.DatabaseVersion ?? "—")</td>
+            <td>@(item.Notes ?? "—")</td>
             <td>
             @if (item.IsRegistered && item.AssetId is { } id)
             {
-                @if (Model.CanEdit) { <a asp-page="/Servers/Edit" asp-route-id="@id">Edit</a> }
-                @if (Model.CanReveal) {
-                <button type="button" data-secret-reveal data-asset-id="@id" data-output="secret-@id">Reveal password</button>
-                <output id="secret-@id" data-secret-output hidden></output>
+                @if (Model.CanEdit)
+                {
+                    <a asp-page="/Servers/Edit" asp-route-id="@id">编辑</a>
                 }
-                @if (Model.CanPing) {
-                <form method="post" asp-page-handler="Ping">
-                    <input type="hidden" name="id" value="@id" />
-                    <button type="submit">Ping</button>
-                </form>
+                @if (Model.CanPing)
+                {
+                    <form method="post" asp-page-handler="Ping">
+                        <input type="hidden" name="id" value="@id" />
+                        <button type="submit" data-submit-label="正在检测">Ping</button>
+                    </form>
                 }
-                @if (Model.CanMarkAlive) {
-                <form method="post" asp-page-handler="MarkAlive">
-                    <input type="hidden" name="id" value="@id" />
-                    <input type="hidden" name="rowVersion" value="@Convert.ToBase64String(item.RowVersion ?? [])" />
-                    <button type="submit">Mark alive</button>
-                </form>
-                }
-                @if (Model.CanArchive) {
-                <form method="post" asp-page-handler="Archive">
-                    <input type="hidden" name="id" value="@id" />
-                    <input type="hidden" name="rowVersion" value="@Convert.ToBase64String(item.RowVersion ?? [])" />
-                    <button type="submit">Archive</button>
-                </form>
+                @if (Model.CanReveal || Model.CanMarkAlive || Model.CanArchive)
+                {
+                    <details>
+                        <summary>更多操作</summary>
+                        @if (Model.CanReveal)
+                        {
+                            <button type="button"
+                                    data-secret-reveal
+                                    data-asset-id="@id"
+                                    data-output="secret-@id">
+                                查看密码
+                            </button>
+                            <output id="secret-@id" data-secret-output hidden></output>
+                        }
+                        @if (Model.CanMarkAlive)
+                        {
+                            <form method="post" asp-page-handler="MarkAlive">
+                                <input type="hidden" name="id" value="@id" />
+                                <input type="hidden" name="rowVersion" value="@Convert.ToBase64String(item.RowVersion ?? [])" />
+                                <button type="submit" data-submit-label="正在标记">标记存活</button>
+                            </form>
+                        }
+                        @if (Model.CanArchive)
+                        {
+                            <form method="post" asp-page-handler="Archive">
+                                <input type="hidden" name="id" value="@id" />
+                                <input type="hidden" name="rowVersion" value="@Convert.ToBase64String(item.RowVersion ?? [])" />
+                                <button type="submit" data-submit-label="正在归档">归档</button>
+                            </form>
+                        }
+                    </details>
                 }
             }
-            else
+            else if (Model.CanCreate)
             {
-                @if (Model.CanCreate) { <a href="/servers?Input.BusinessIp=@item.BusinessIp">Register this IP</a> }
+                <a href="/servers?Input.BusinessIp=@item.BusinessIp">登记此 IP</a>
             }
             </td>
         </tr>
     }
     </tbody>
 </table>
-<p>Showing @Model.Results.Items.Count of @Model.Results.TotalCount.</p>
-<nav aria-label="Server pages">
+
+<p>显示 @Model.Results.Items.Count 条，共 @Model.Results.TotalCount 条。</p>
+<nav aria-label="服务器分页">
     @if (Model.Query.Skip > 0)
     {
         <form method="get">
-            <input type="hidden" asp-for="Query.Search" /><input type="hidden" asp-for="Query.SubnetId" />
-            <input type="hidden" asp-for="Query.Status" /><input type="hidden" asp-for="Query.IncludeArchived" />
-            <input type="hidden" asp-for="Query.PoolMode" /><input type="hidden" asp-for="Query.Take" />
-            <button type="submit" name="Query.Skip" value="@Math.Max(0, Model.Query.Skip - Model.Query.Take)">Previous</button>
+            <input type="hidden" asp-for="Query.Search" />
+            <input type="hidden" asp-for="Query.SubnetId" />
+            <input type="hidden" asp-for="Query.Status" />
+            <input type="hidden" asp-for="Query.IncludeArchived" />
+            <input type="hidden" asp-for="Query.PoolMode" />
+            <input type="hidden" asp-for="Query.Take" />
+            <button type="submit"
+                    name="Query.Skip"
+                    value="@Math.Max(0, Model.Query.Skip - Model.Query.Take)">
+                上一页
+            </button>
         </form>
     }
     @if ((long)Model.Query.Skip + Model.Results.Items.Count < Model.Results.TotalCount)
     {
         <form method="get">
-            <input type="hidden" asp-for="Query.Search" /><input type="hidden" asp-for="Query.SubnetId" />
-            <input type="hidden" asp-for="Query.Status" /><input type="hidden" asp-for="Query.IncludeArchived" />
-            <input type="hidden" asp-for="Query.PoolMode" /><input type="hidden" asp-for="Query.Take" />
-            <button type="submit" name="Query.Skip" value="@(Model.Query.Skip + Model.Query.Take)">Next</button>
+            <input type="hidden" asp-for="Query.Search" />
+            <input type="hidden" asp-for="Query.SubnetId" />
+            <input type="hidden" asp-for="Query.Status" />
+            <input type="hidden" asp-for="Query.IncludeArchived" />
+            <input type="hidden" asp-for="Query.PoolMode" />
+            <input type="hidden" asp-for="Query.Take" />
+            <button type="submit"
+                    name="Query.Skip"
+                    value="@(Model.Query.Skip + Model.Query.Take)">
+                下一页
+            </button>
         </form>
     }
 </nav>
+
+@if (Model.CanCreate)
+{
+    <noscript>
+        <style>
+            #register-server.drawer {
+                position: static;
+                width: 100%;
+                margin-top: 20px;
+                transform: none;
+                visibility: visible;
+            }
+        </style>
+    </noscript>
+    <aside id="register-server"
+           class="drawer"
+           data-drawer="register-server"
+           @Html.Raw(openRegistration ? "data-open" : string.Empty)
+           aria-labelledby="register-server-title"
+           aria-hidden="@((!openRegistration).ToString().ToLowerInvariant())">
+        <header class="page-header">
+            <div>
+                <h2 id="register-server-title">登记服务器</h2>
+                <p>登记业务 IP 与系统归属，密码可留空。</p>
+            </div>
+            <button type="button" data-drawer-close aria-label="关闭登记面板">关闭</button>
+        </header>
+        <form method="post" asp-page-handler="Create">
+            <div>
+                <label asp-for="Input.BusinessIp">业务 IP</label>
+                <input asp-for="Input.BusinessIp" data-drawer-initial-focus />
+                <span asp-validation-for="Input.BusinessIp"></span>
+            </div>
+            <div>
+                <label asp-for="Input.Location">位置</label>
+                <input asp-for="Input.Location" />
+                <span asp-validation-for="Input.Location"></span>
+            </div>
+            <div>
+                <label asp-for="Input.AliveStatus">状态</label>
+                <select asp-for="Input.AliveStatus">
+                    @foreach (var status in Enum.GetValues<AliveStatus>())
+                    {
+                        <option value="@status">@UiLabels.ForAliveStatus(status)</option>
+                    }
+                </select>
+            </div>
+            <div>
+                <label asp-for="Input.ComputerName">计算机名</label>
+                <input asp-for="Input.ComputerName" />
+                <span asp-validation-for="Input.ComputerName"></span>
+            </div>
+            <div>
+                <label asp-for="Input.SystemName">系统名称</label>
+                <input asp-for="Input.SystemName" />
+                <span asp-validation-for="Input.SystemName"></span>
+            </div>
+            <div>
+                <label asp-for="Input.OperatingSystemVersion">操作系统版本</label>
+                <input asp-for="Input.OperatingSystemVersion" />
+            </div>
+            <div>
+                <label asp-for="Input.DatabaseVersion">数据库版本</label>
+                <input asp-for="Input.DatabaseVersion" />
+            </div>
+            <div>
+                <label asp-for="Input.Notes">备注</label>
+                <textarea asp-for="Input.Notes"></textarea>
+            </div>
+            <div>
+                <label asp-for="Input.Password">密码（可选）</label>
+                <input asp-for="Input.Password" autocomplete="new-password" />
+            </div>
+            <button type="submit" data-submit-label="正在登记">登记服务器</button>
+        </form>
+    </aside>
+}
 
 @if (Model.CanReveal)
 {
