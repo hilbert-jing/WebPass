@@ -17,7 +17,9 @@
         }
         drawerOpeners.set(drawer, opener);
         opener?.setAttribute("aria-expanded", "true");
-        drawer.querySelector(focusable)?.focus();
+        const initialFocus = drawer.querySelector("[data-drawer-initial-focus]") ??
+            drawer.querySelector(focusable);
+        initialFocus?.focus();
     }
 
     function closeDrawer(drawer) {
@@ -57,13 +59,12 @@
     document.querySelectorAll("[data-nav-toggle]").forEach(button => {
         button.addEventListener("click", () => {
             const sidebar = document.getElementById(button.getAttribute("aria-controls"));
-            const open = sidebar?.toggleAttribute("data-open");
-            if (sidebar && open) {
-                drawerOpeners.set(sidebar, button);
-            } else if (sidebar) {
-                drawerOpeners.delete(sidebar);
+            if (!sidebar) return;
+            if (sidebar.hasAttribute("data-open")) {
+                closeDrawer(sidebar);
+                return;
             }
-            button.setAttribute("aria-expanded", String(Boolean(open)));
+            openDrawer(sidebar.id, button);
         });
     });
 

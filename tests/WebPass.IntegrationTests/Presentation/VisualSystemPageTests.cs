@@ -35,4 +35,39 @@ public sealed class VisualSystemPageTests
         Assert.Contains("--color-accent: #2e75a8", css, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("prefers-reduced-motion: reduce", css, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task Mobile_navigation_declares_and_uses_an_initial_focus_target()
+    {
+        using var factory = new PresentationFactory();
+        factory.InitializeUser(false, PermissionCode.AssetView);
+        using var client = factory.CreateAuthenticatedClient();
+
+        var html = await client.GetStringAsync("/servers");
+        var script = await client.GetStringAsync("/js/site.js");
+
+        Assert.Contains("data-drawer-initial-focus", html, StringComparison.Ordinal);
+        Assert.Contains(
+            "drawer.querySelector(\"[data-drawer-initial-focus]\")",
+            script,
+            StringComparison.Ordinal);
+        Assert.Contains("openDrawer(sidebar.id, button);", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Tablet_shell_keeps_post_logout_control_visible()
+    {
+        using var factory = new PresentationFactory();
+        factory.InitializeUser(false, PermissionCode.AssetView);
+        using var client = factory.CreateAuthenticatedClient();
+
+        var html = await client.GetStringAsync("/servers");
+        var css = await client.GetStringAsync("/css/site.css");
+
+        Assert.Contains("class=\"sidebar-logout\"", html, StringComparison.Ordinal);
+        Assert.Contains("method=\"post\"", html, StringComparison.Ordinal);
+        Assert.Contains("action=\"/Logout\"", html, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(".sidebar-logout {", css, StringComparison.Ordinal);
+        Assert.Contains("clip-path: none", css, StringComparison.Ordinal);
+    }
 }

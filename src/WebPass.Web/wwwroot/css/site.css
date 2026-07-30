@@ -645,8 +645,7 @@ table tbody tr:last-child td {
     .brand-copy,
     .nav-group h2,
     .nav-label,
-    .account-copy,
-    .sidebar-account form {
+    .account-copy {
         position: absolute;
         width: 1px;
         height: 1px;
@@ -666,7 +665,22 @@ table tbody tr:last-child td {
 
     .sidebar-account {
         display: flex;
+        flex-direction: column;
         justify-content: center;
+    }
+
+    .sidebar-logout {
+        position: static;
+        width: auto;
+        height: auto;
+        overflow: visible;
+        clip-path: none;
+        white-space: normal;
+    }
+
+    .sidebar-logout .logout-button {
+        min-width: 48px;
+        padding-inline: 6px;
     }
 
     .app-content {
