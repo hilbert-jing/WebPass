@@ -37,7 +37,7 @@ public sealed class ReauthenticateModel(ReauthenticationService reauthentication
         }
         catch (UnauthorizedAccessException)
         {
-            ModelState.AddModelError(string.Empty, "Current-password verification failed.");
+            ModelState.AddModelError(string.Empty, "当前密码验证失败。");
             return Page();
         }
 
@@ -52,7 +52,7 @@ public sealed class ReauthenticateModel(ReauthenticationService reauthentication
 
     public sealed class InputModel
     {
-        [Required]
+        [Required(ErrorMessage = "请输入当前密码。")]
         [DataType(DataType.Password)]
         public string Password { get; set; } = string.Empty;
     }

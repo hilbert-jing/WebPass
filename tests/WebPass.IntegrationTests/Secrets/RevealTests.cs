@@ -110,6 +110,9 @@ public sealed class RevealTests
         factory.InitializeData();
         using var client = factory.CreateAuthenticatedClient();
 
+        var html = await client.GetStringAsync("/secrets/reauthenticate");
+        Assert.Contains("验证当前密码", html, StringComparison.Ordinal);
+
         var responses = new List<HttpResponseMessage>();
         for (var attempt = 0; attempt < 6; attempt++)
         {

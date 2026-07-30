@@ -1,15 +1,20 @@
 @page "/login"
 @model WebPass.Web.Pages.LoginModel
 @{
-    ViewData["Title"] = "Login";
+    ViewData["Title"] = "登录";
+    ViewData["LayoutVariant"] = "Focused";
 }
 
-<h1>WebPass login</h1>
-<form method="post">
-    <div asp-validation-summary="ModelOnly"></div>
-    <label asp-for="Input.Username"></label>
-    <input asp-for="Input.Username" autocomplete="username" />
-    <label asp-for="Input.Password"></label>
-    <input asp-for="Input.Password" type="password" autocomplete="current-password" />
-    <button type="submit">Sign in</button>
-</form>
+<section class="auth-panel" aria-labelledby="login-title">
+    <div class="auth-brand">WebPass</div>
+    <h1 id="login-title">登录 WebPass</h1>
+    <p>请使用您的工作账号继续。</p>
+    <form method="post">
+        <div asp-validation-summary="ModelOnly"></div>
+        <label asp-for="Input.Username">用户名</label>
+        <input asp-for="Input.Username" autocomplete="username" />
+        <label asp-for="Input.Password">密码</label>
+        <input asp-for="Input.Password" type="password" autocomplete="current-password" />
+        <button type="submit">正在登录</button>
+    </form>
+</section>

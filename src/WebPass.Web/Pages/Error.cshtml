@@ -1,8 +1,14 @@
 @page "/error"
 @model WebPass.Web.Pages.ErrorModel
 @{
-    ViewData["Title"] = "Request error";
+    ViewData["Title"] = "请求错误";
+    ViewData["LayoutVariant"] = "Focused";
 }
 
-<h1>We could not complete that request.</h1>
-<p>Reference: @Model.CorrelationId</p>
+<section class="auth-panel" aria-labelledby="error-title">
+    <div class="auth-brand">WebPass</div>
+    <h1 id="error-title">无法完成此请求</h1>
+    <p>请稍后重试；如问题持续出现，请向管理员提供以下关联编号。</p>
+    <p class="correlation-id">关联编号：<code>@Model.CorrelationId</code></p>
+    <a href="/servers">返回服务器资产</a>
+</section>

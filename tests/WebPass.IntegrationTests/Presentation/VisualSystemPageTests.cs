@@ -5,6 +5,25 @@ namespace WebPass.IntegrationTests.Presentation;
 
 public sealed class VisualSystemPageTests
 {
+    [Theory]
+    [InlineData("/login", "登录 WebPass")]
+    [InlineData("/secrets/reauthenticate", "验证当前密码")]
+    [InlineData("/error", "无法完成此请求")]
+    public async Task Focused_pages_use_chinese_copy_without_business_navigation(
+        string path,
+        string heading)
+    {
+        using var factory = new PresentationFactory();
+        factory.InitializeUser(false, PermissionCode.SecretReveal);
+        using var client = factory.CreateAuthenticatedClient();
+
+        var html = await client.GetStringAsync(path);
+
+        Assert.Contains(heading, html, StringComparison.Ordinal);
+        Assert.Contains("focused-shell", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("资产作业", html, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task Authenticated_shell_is_chinese_and_permission_scoped()
     {

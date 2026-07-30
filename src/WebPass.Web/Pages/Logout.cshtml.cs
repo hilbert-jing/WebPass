@@ -29,6 +29,7 @@ public sealed class LogoutModel(AuditWriter auditWriter) : PageModel
             ct);
         await HttpContext.SignOutAsync(
             CookieAuthenticationDefaults.AuthenticationScheme);
+        TempData["StatusMessage"] = "已安全退出。";
         return Redirect("/login");
     }
 }
