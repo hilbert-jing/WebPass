@@ -21,7 +21,7 @@
 - HTTPS 服务器证书，其主题备用名称包含客户端使用的确切 IPv4 地址。
 - 具有可导出私钥的 RSA 数据加密证书。不要复用 HTTPS 证书。
 
-在启动 WebPass 前，请遵循 [certificates-and-key-recovery.md](certificates-and-key-recovery.md)。客户端证书警告代表部署失败，不应要求用户绕过。
+启动 WebPass 前，请遵循 [certificates-and-key-recovery.md](certificates-and-key-recovery.md)。客户端证书警告代表部署失败，不应要求用户绕过。
 
 ## 3. 发布和数据库迁移
 
@@ -33,11 +33,21 @@ dotnet publish src\WebPass.Web -c Release -r win-x64 --self-contained false -o C
 
 确认 `C:\WebPass\staging\web.config` 存在。将生产连接字符串配置为位于 `localhost` 或 `localhost\SQLEXPRESS` 的数据库；不要使用局域网主机名或远程地址。使用数据加密证书（而不是 HTTPS 证书）的指纹配置 `SecretEncryption:CertificateThumbprint`。
 
-使用可修改 WebPass 数据库的部署身份应用 EF 迁移：
+从同一审核源提交构建 migration bundle，并放入暂存目录：
 
 ```powershell
-dotnet ef database update --project src\WebPass.Web --startup-project src\WebPass.Web --configuration Release
+.\scripts\Build-WebPassMigrationBundle.ps1 `
+  -OutputPath C:\WebPass\staging\WebPass.Migrations.exe
 ```
+
+使用可修改 WebPass 数据库的部署身份应用迁移：
+
+```powershell
+C:\WebPass\staging\WebPass.Migrations.exe `
+  --connection "Server=localhost\SQLEXPRESS;Database=WebPass;Integrated Security=True;TrustServerCertificate=True"
+```
+
+如果 bundle 创建或执行失败，请停止部署。每个已审核发布版本都必须生成新的 bundle；不得复用另一源版本的 bundle。运行中的 WebPass 网站不会自动应用迁移。
 
 运行时 IIS 应用程序池身份应仅获得所需的 WebPass 数据库访问权限。迁移后，不要保留运行时身份的架构所有者或服务器管理员权限。
 
@@ -64,7 +74,28 @@ dotnet ef database update --project src\WebPass.Web --startup-project src\WebPas
 
 该脚本特意不会启用 SQL 网络访问、创建数据库管理员、替换现有 TLS 绑定或安装先决条件。
 
-## 5. 生产检查
+## 5. 创建管理员
+
+单独发布本地初始化工具：
+
+```powershell
+dotnet publish src\WebPass.AdminInit -c Release -r win-x64 `
+  --self-contained false -o C:\WebPass\AdminInit
+```
+
+使用可向 WebPass 数据库插入记录的部署身份，在本机运行：
+
+```powershell
+C:\WebPass\AdminInit\WebPass.AdminInit.exe `
+  --connection-string "Server=localhost\SQLEXPRESS;Database=WebPass;Integrated Security=True;TrustServerCertificate=True" `
+  --username admin
+```
+
+在隐藏提示中输入并确认密码。该命令不会检查是否已有用户或管理员；每次成功调用都会为请求的不同用户名创建另一位管理员。
+
+运行中的网站不需要此工具。若操作人员不需要保留它，可在使用后删除 `C:\WebPass\AdminInit`。
+
+## 6. 生产检查
 
 在 IIS Manager 中确认：
 
@@ -76,6 +107,6 @@ dotnet ef database update --project src\WebPass.Web --startup-project src\WebPas
 
 从受信任的局域网客户端确认浏览器报告证书受信任且没有警告。然后打开 `/health`；它必须仅返回 `application` 和 `database` 可用性。完成 [acceptance-test-record.md](acceptance-test-record.md)。
 
-## 6. 更新和回滚
+## 7. 更新和回滚
 
 将每个已审核版本发布到新的带版本号目录。停止站点，切换 IIS 物理路径，启动站点并运行验收检查。如果应用程序失败，请停止站点并恢复先前物理路径。数据库回滚应由操作人员另行决定，不得临时依据导出的 XLSX 文件执行。
