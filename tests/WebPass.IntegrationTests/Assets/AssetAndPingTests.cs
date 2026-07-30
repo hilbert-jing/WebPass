@@ -452,6 +452,55 @@ public sealed class AssetAndPingTests
     }
 
     [Fact]
+    public async Task Edit_page_groups_server_fields_and_keeps_update_concurrency_inputs()
+    {
+        using var factory = new ServerPageFactory(NewUser(), PermissionCode.AssetView, PermissionCode.AssetEdit);
+        factory.InitializeData();
+        await factory.AddSubnetAsync();
+        var asset = await factory.AddAssetAsync("10.0.0.9", "HQ", [1]);
+        using var client = factory.CreateAuthenticatedClient();
+
+        var editHtml = await client.GetStringAsync($"/servers/{asset.Id}/edit");
+
+        Assert.Contains("身份与位置", editHtml, StringComparison.Ordinal);
+        Assert.Contains("系统信息", editHtml, StringComparison.Ordinal);
+        Assert.Contains("凭据与备注", editHtml, StringComparison.Ordinal);
+        Assert.Contains("留空则保留当前密码", editHtml, StringComparison.Ordinal);
+        Assert.Contains($"name=\"id\" value=\"{asset.Id}\"", editHtml, StringComparison.Ordinal);
+        Assert.Contains("name=\"rowVersion\"", editHtml, StringComparison.Ordinal);
+        Assert.Contains("autocomplete=\"new-password\"", editHtml, StringComparison.Ordinal);
+        Assert.Contains("保存更改", editHtml, StringComparison.Ordinal);
+        Assert.Contains("返回服务器资产", editHtml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Edit_business_rule_failure_uses_safe_chinese_message()
+    {
+        using var factory = new ServerPageFactory(NewUser(), PermissionCode.AssetView, PermissionCode.AssetEdit);
+        factory.InitializeData();
+        await factory.AddSubnetAsync();
+        var duplicate = await factory.AddAssetAsync("10.0.0.9", "HQ", [1]);
+        var asset = await factory.AddAssetAsync("10.0.0.10", "Branch", [2]);
+        using var client = factory.CreateAuthenticatedClient();
+        var html = await client.GetStringAsync($"/servers/{asset.Id}/edit");
+        var token = Regex.Match(html, "name=\"__RequestVerificationToken\"[^>]*value=\"([^\"]+)\"").Groups[1].Value;
+
+        var response = await client.PostAsync($"/servers/{asset.Id}/edit", new FormUrlEncodedContent(
+        [new("id", asset.Id.ToString()), new("rowVersion", Convert.ToBase64String([2])),
+         new("Input.BusinessIp", duplicate.BusinessIp), new("Input.Location", "Branch"),
+         new("Input.AliveStatus", "Unknown"), new("Input.ComputerName", "branch"),
+         new("Input.SystemName", "Branch"), new("__RequestVerificationToken", token)]));
+        var responseHtml = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("无法保存服务器：请检查 IP、网段和字段内容。", responseHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "An active server asset already uses this business IP.",
+            responseHtml,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Edit_conflict_renders_current_database_values_not_stale_posted_values()
     {
         using var factory = new ServerPageFactory(NewUser(), PermissionCode.AssetView, PermissionCode.AssetEdit);
@@ -471,7 +520,10 @@ public sealed class AssetAndPingTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Contains("Current", conflictHtml, StringComparison.Ordinal);
         Assert.DoesNotContain("value=\"Stale\"", conflictHtml, StringComparison.Ordinal);
-        Assert.Contains("changed by another user", conflictHtml, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "该服务器已被其他用户修改。以下为最新数据，请核对后重新保存。",
+            conflictHtml,
+            StringComparison.Ordinal);
     }
 
     [Fact]

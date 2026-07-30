@@ -162,7 +162,12 @@
                                     data-output="secret-@id">
                                 查看密码
                             </button>
-                            <output id="secret-@id" data-secret-output hidden></output>
+                            <section id="secret-@id" data-secret-panel hidden>
+                                <span data-secret-status role="status" aria-live="polite">服务器密码将在 30 秒后自动隐藏</span>
+                                <code data-secret-value></code>
+                                <span data-secret-countdown aria-hidden="true">30</span>
+                                <button type="button" data-secret-copy>复制密码</button>
+                            </section>
                         }
                         @if (Model.CanMarkAlive)
                         {

@@ -1,30 +1,106 @@
 @page "/servers/{id:guid?}/edit"
 @model WebPass.Web.Pages.Servers.EditModel
 @{
-    ViewData["Title"] = "Edit server";
+    ViewData["Title"] = "编辑服务器";
+    var modelErrors = ViewData.ModelState[string.Empty]?.Errors
+        .Select(error => error.ErrorMessage)
+        .Where(message => !string.IsNullOrWhiteSpace(message))
+        .ToArray() ?? [];
+    var hasConcurrencyError = modelErrors.Any(
+        message => message.Contains("changed by another user", StringComparison.OrdinalIgnoreCase));
 }
 
-<h1>Edit server</h1>
-<div asp-validation-summary="ModelOnly"></div>
+<header class="page-header">
+    <div>
+        <h1>编辑服务器</h1>
+        <p>更新服务器身份、系统信息与凭据。保存前请核对业务 IP 和当前状态。</p>
+    </div>
+</header>
+
+@if (hasConcurrencyError)
+{
+    <p class="alert-region" role="alert">该服务器已被其他用户修改。以下为最新数据，请核对后重新保存。</p>
+}
+else if (modelErrors.Length > 0)
+{
+    <p class="alert-region" role="alert">无法保存服务器：请检查 IP、网段和字段内容。</p>
+}
+
 @if (Model.AssetId is not null)
 {
     <form method="post">
         <input type="hidden" name="id" value="@Model.AssetId" />
         <input type="hidden" name="rowVersion" value="@Model.RowVersion" />
-        <label asp-for="Input.BusinessIp"></label><input asp-for="Input.BusinessIp" />
-        <label asp-for="Input.Location"></label><input asp-for="Input.Location" />
-        <label asp-for="Input.AliveStatus"></label><select asp-for="Input.AliveStatus" asp-items="Html.GetEnumSelectList<WebPass.Web.Domain.Enums.AliveStatus>()"></select>
-        <label asp-for="Input.ComputerName"></label><input asp-for="Input.ComputerName" />
-        <label asp-for="Input.SystemName"></label><input asp-for="Input.SystemName" />
-        <label asp-for="Input.OperatingSystemVersion"></label><input asp-for="Input.OperatingSystemVersion" />
-        <label asp-for="Input.DatabaseVersion"></label><input asp-for="Input.DatabaseVersion" />
-        <label asp-for="Input.Notes"></label><textarea asp-for="Input.Notes"></textarea>
-        <label asp-for="Input.Password"></label><input asp-for="Input.Password" autocomplete="new-password" />
-        <small>Leave blank to keep the current password.</small>
-        <button type="submit">Save server</button>
+
+        <fieldset class="form-section">
+            <legend>身份与位置</legend>
+            <div>
+                <label asp-for="Input.BusinessIp">业务 IP</label>
+                <input asp-for="Input.BusinessIp" />
+                <span asp-validation-for="Input.BusinessIp"></span>
+            </div>
+            <div>
+                <label asp-for="Input.Location">位置</label>
+                <input asp-for="Input.Location" />
+                <span asp-validation-for="Input.Location"></span>
+            </div>
+            <div>
+                <label asp-for="Input.AliveStatus">状态</label>
+                <select asp-for="Input.AliveStatus" asp-items="Html.GetEnumSelectList<WebPass.Web.Domain.Enums.AliveStatus>()"></select>
+                <span asp-validation-for="Input.AliveStatus"></span>
+            </div>
+            <div>
+                <label asp-for="Input.ComputerName">计算机名</label>
+                <input asp-for="Input.ComputerName" />
+                <span asp-validation-for="Input.ComputerName"></span>
+            </div>
+        </fieldset>
+
+        <fieldset class="form-section">
+            <legend>系统信息</legend>
+            <div>
+                <label asp-for="Input.SystemName">系统名称</label>
+                <input asp-for="Input.SystemName" />
+                <span asp-validation-for="Input.SystemName"></span>
+            </div>
+            <div>
+                <label asp-for="Input.OperatingSystemVersion">操作系统版本</label>
+                <input asp-for="Input.OperatingSystemVersion" />
+                <span asp-validation-for="Input.OperatingSystemVersion"></span>
+            </div>
+            <div>
+                <label asp-for="Input.DatabaseVersion">数据库版本</label>
+                <input asp-for="Input.DatabaseVersion" />
+                <span asp-validation-for="Input.DatabaseVersion"></span>
+            </div>
+        </fieldset>
+
+        <fieldset class="form-section">
+            <legend>凭据与备注</legend>
+            <div>
+                <label asp-for="Input.Password">新密码</label>
+                <input asp-for="Input.Password" autocomplete="new-password" />
+                <small>留空则保留当前密码</small>
+                <span asp-validation-for="Input.Password"></span>
+            </div>
+            <div>
+                <label asp-for="Input.Notes">备注</label>
+                <textarea asp-for="Input.Notes"></textarea>
+                <span asp-validation-for="Input.Notes"></span>
+            </div>
+        </fieldset>
+
+        <div>
+            <button type="submit" data-submit-label="正在保存">保存更改</button>
+            <a asp-page="/Servers/Index">返回服务器资产</a>
+        </div>
     </form>
 }
 else
 {
-    <p>Use the server inventory page to register @Model.Input.BusinessIp.</p>
+    <section class="form-section">
+        <h2>尚未登记此服务器</h2>
+        <p>业务 IP：<span class="data-value">@Model.Input.BusinessIp</span></p>
+        <a asp-page="/Servers/Index" asp-route-Input.BusinessIp="@Model.Input.BusinessIp">前往服务器资产登记此 IP</a>
+    </section>
 }

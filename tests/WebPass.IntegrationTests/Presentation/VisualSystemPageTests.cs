@@ -131,6 +131,34 @@ public sealed class VisualSystemPageTests
     }
 
     [Fact]
+    public async Task Secret_reveal_asset_clears_sensitive_values_on_expiry_and_page_lifecycle()
+    {
+        using var factory = new PresentationFactory();
+        using var client = factory.CreateClient();
+
+        var script = await client.GetStringAsync("/js/secret-reveal.js");
+
+        Assert.Contains("method: \"POST\"", script, StringComparison.Ordinal);
+        Assert.Contains("credentials: \"same-origin\"", script, StringComparison.Ordinal);
+        Assert.Contains("[data-secret-value]", script, StringComparison.Ordinal);
+        Assert.Contains("[data-secret-countdown]", script, StringComparison.Ordinal);
+        Assert.Contains("navigator.clipboard.writeText", script, StringComparison.Ordinal);
+        Assert.Contains("new AbortController()", script, StringComparison.Ordinal);
+        Assert.Contains("signal: controller.signal", script, StringComparison.Ordinal);
+        Assert.Contains("visibilitychange", script, StringComparison.Ordinal);
+        Assert.Contains("document.visibilityState === \"hidden\"", script, StringComparison.Ordinal);
+        Assert.Contains(
+            """
+            if (document.visibilityState === "hidden") {
+                        clearAll();
+                    }
+            """,
+            script,
+            StringComparison.Ordinal);
+        Assert.Contains("window.addEventListener(\"pagehide\", clearAll)", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Stylesheet_contains_confirmed_tokens_and_reduced_motion()
     {
         using var factory = new PresentationFactory();
