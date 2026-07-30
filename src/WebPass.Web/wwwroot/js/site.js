@@ -36,6 +36,18 @@
         drawerOpeners.delete(drawer);
     }
 
+    document.querySelectorAll(".drawer[data-drawer]").forEach(drawer => {
+        const isOpen = drawer.hasAttribute("data-open");
+        drawer.setAttribute("aria-hidden", isOpen ? "false" : "true");
+
+        const opener = Array.from(document.querySelectorAll("[data-drawer-open]"))
+            .find(candidate => getDrawer(candidate.dataset.drawerOpen) === drawer);
+        if (!opener) return;
+
+        opener.setAttribute("aria-expanded", isOpen ? "true" : "false");
+        if (isOpen) drawerOpeners.set(drawer, opener);
+    });
+
     async function copyText(button) {
         const target = getDrawer(button.dataset.copy) ||
             (button.dataset.copy ? document.querySelector(button.dataset.copy) : null);

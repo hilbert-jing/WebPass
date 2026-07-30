@@ -40,7 +40,7 @@ public sealed class IndexModel(
 
     public async Task OnGetAsync(CancellationToken ct)
     {
-        ModelState.Clear();
+        ClearRegistrationValidationState();
         await LoadAsync(ct);
     }
 
@@ -67,15 +67,19 @@ public sealed class IndexModel(
         }
     }
 
-    public async Task<IActionResult> OnPostArchiveAsync(Guid id, string? rowVersion, CancellationToken ct) =>
-        await ExecuteAsync(
+    public async Task<IActionResult> OnPostArchiveAsync(Guid id, string? rowVersion, CancellationToken ct)
+    {
+        ClearRegistrationValidationState();
+        return await ExecuteAsync(
             PermissionCode.AssetArchive,
             () => assetService.ArchiveAsync(id, DecodeRowVersion(rowVersion), UserId(), ct),
             "服务器已归档。",
             ct);
+    }
 
     public async Task<IActionResult> OnPostPingAsync(Guid id, CancellationToken ct)
     {
+        ClearRegistrationValidationState();
         if (!await AllowedAsync(PermissionCode.PingExecute, ct)) return Forbid();
         try
         {
@@ -96,12 +100,15 @@ public sealed class IndexModel(
         catch (KeyNotFoundException exception) { return NotFound(exception.Message); }
     }
 
-    public async Task<IActionResult> OnPostMarkAliveAsync(Guid id, string? rowVersion, CancellationToken ct) =>
-        await ExecuteAsync(
+    public async Task<IActionResult> OnPostMarkAliveAsync(Guid id, string? rowVersion, CancellationToken ct)
+    {
+        ClearRegistrationValidationState();
+        return await ExecuteAsync(
             PermissionCode.StatusMarkAlive,
             () => pingService.MarkAliveAsync(id, UserId(), DecodeRowVersion(rowVersion), ct),
             "服务器已标记为存活。",
             ct);
+    }
 
     private async Task<IActionResult> ExecuteAsync(
         string permission,
@@ -166,6 +173,14 @@ public sealed class IndexModel(
 
     private Task<bool> AllowedAsync(string permission, CancellationToken ct) => permissions.IsAllowedAsync(UserId(), permission, ct);
     private Guid UserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+
+    private void ClearRegistrationValidationState()
+    {
+        ModelState.Remove(nameof(ServerForm.BusinessIp));
+        ModelState.Remove(nameof(ServerForm.Location));
+        ModelState.Remove(nameof(ServerForm.ComputerName));
+        ModelState.Remove(nameof(ServerForm.SystemName));
+    }
 
     private static byte[] DecodeRowVersion(string? value)
     {

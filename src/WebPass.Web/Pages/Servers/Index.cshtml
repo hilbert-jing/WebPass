@@ -5,7 +5,9 @@
 @{
     ViewData["Title"] = "服务器资产";
     var openRegistration = Model.CanCreate &&
-        (Request.Method == "POST" || !string.IsNullOrWhiteSpace(Model.Input.BusinessIp));
+        ((Request.Method == "POST" &&
+          string.Equals(Request.Query["handler"], "Create", StringComparison.OrdinalIgnoreCase)) ||
+         !string.IsNullOrWhiteSpace(Model.Input.BusinessIp));
 }
 
 <header class="page-header">
@@ -244,8 +246,7 @@
            class="drawer"
            data-drawer="register-server"
            @Html.Raw(openRegistration ? "data-open" : string.Empty)
-           aria-labelledby="register-server-title"
-           aria-hidden="@((!openRegistration).ToString().ToLowerInvariant())">
+           aria-labelledby="register-server-title">
         <header class="page-header">
             <div>
                 <h2 id="register-server-title">登记服务器</h2>

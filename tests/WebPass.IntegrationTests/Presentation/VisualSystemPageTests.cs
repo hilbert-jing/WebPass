@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using WebPass.Web.Application.Authorization;
 using WebPass.Web.Domain.Entities;
 using WebPass.Web.Domain.Enums;
@@ -91,6 +92,42 @@ public sealed class VisualSystemPageTests
         Assert.Contains("data-drawer=\"register-server\"", html, StringComparison.Ordinal);
         Assert.DoesNotContain("data-open=\"\"", html, StringComparison.Ordinal);
         Assert.Contains("data-submit-label=\"正在检测\"", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Server_drawer_uses_progressive_enhancement_for_accessibility_and_preopened_focus()
+    {
+        using var factory = new PresentationFactory();
+        factory.InitializeUser(
+            false,
+            PermissionCode.AssetView,
+            PermissionCode.AssetCreate);
+        using var client = factory.CreateAuthenticatedClient();
+
+        var html = await client.GetStringAsync(
+            "/servers?Input.BusinessIp=10.0.0.1");
+        var script = await client.GetStringAsync("/js/site.js");
+        var drawerTag = Regex.Match(
+            html,
+            "<aside[^>]*data-drawer=\"register-server\"[^>]*>",
+            RegexOptions.Singleline).Value;
+
+        Assert.Contains("data-open", drawerTag, StringComparison.Ordinal);
+        Assert.DoesNotContain("aria-hidden", drawerTag, StringComparison.Ordinal);
+        Assert.Contains("aria-expanded=\"true\"", html, StringComparison.Ordinal);
+        Assert.Contains("<noscript>", html, StringComparison.Ordinal);
+        Assert.Contains(
+            "document.querySelectorAll(\".drawer[data-drawer]\")",
+            script,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "drawer.setAttribute(\"aria-hidden\", isOpen ? \"false\" : \"true\");",
+            script,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "drawerOpeners.set(drawer, opener);",
+            script,
+            StringComparison.Ordinal);
     }
 
     [Fact]

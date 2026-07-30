@@ -237,10 +237,10 @@ public sealed class AssetAndPingTests
         var responseHtml = WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync());
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Contains("请输入业务 IP。", responseHtml, StringComparison.Ordinal);
-        Assert.Contains("请输入位置。", responseHtml, StringComparison.Ordinal);
-        Assert.Contains("请输入计算机名。", responseHtml, StringComparison.Ordinal);
-        Assert.Contains("请输入系统名称。", responseHtml, StringComparison.Ordinal);
+        Assert.Contains(">请输入业务 IP。</span>", responseHtml, StringComparison.Ordinal);
+        Assert.Contains(">请输入位置。</span>", responseHtml, StringComparison.Ordinal);
+        Assert.Contains(">请输入计算机名。</span>", responseHtml, StringComparison.Ordinal);
+        Assert.Contains(">请输入系统名称。</span>", responseHtml, StringComparison.Ordinal);
         Assert.Contains("data-open", responseHtml, StringComparison.Ordinal);
     }
 
@@ -338,16 +338,60 @@ public sealed class AssetAndPingTests
         var tokenHtml = await client.GetStringAsync("/login");
         var token = Regex.Match(tokenHtml, "name=\"__RequestVerificationToken\"[^>]*value=\"([^\"]+)\"").Groups[1].Value;
 
-        Assert.DoesNotContain("Create server", html, StringComparison.Ordinal);
-        Assert.DoesNotContain(">Edit<", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-drawer=\"register-server\"", html, StringComparison.Ordinal);
+        Assert.DoesNotContain(">编辑<", html, StringComparison.Ordinal);
         Assert.DoesNotContain(">Ping<", html, StringComparison.Ordinal);
-        Assert.DoesNotContain("Mark alive", html, StringComparison.Ordinal);
-        Assert.DoesNotContain(">Archive<", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-secret-reveal", html, StringComparison.Ordinal);
+        Assert.DoesNotContain(">标记存活<", html, StringComparison.Ordinal);
+        Assert.DoesNotContain(">归档<", html, StringComparison.Ordinal);
 
         var response = await client.PostAsync("/servers?handler=Ping", new FormUrlEncodedContent(
             [new("id", asset.Id.ToString()), new("__RequestVerificationToken", token)]));
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Invalid_get_filter_keeps_query_binding_error_visible()
+    {
+        using var factory = new ServerPageFactory(NewUser(), PermissionCode.AssetView);
+        factory.InitializeData();
+        using var client = factory.CreateAuthenticatedClient();
+
+        var html = await client.GetStringAsync("/servers?Query.Status=not-a-status");
+
+        Assert.Contains("请检查表单中标记的错误后重试。", html, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("MarkAlive", PermissionCode.StatusMarkAlive)]
+    [InlineData("Archive", PermissionCode.AssetArchive)]
+    public async Task Failed_non_create_command_does_not_validate_or_open_registration_drawer(
+        string handler,
+        string permission)
+    {
+        using var factory = new ServerPageFactory(
+            NewUser(),
+            PermissionCode.AssetView,
+            PermissionCode.AssetCreate,
+            permission);
+        factory.InitializeData();
+        using var client = factory.CreateAuthenticatedClient();
+        var html = await client.GetStringAsync("/servers");
+        var token = Regex.Match(html, "name=\"__RequestVerificationToken\"[^>]*value=\"([^\"]+)\"").Groups[1].Value;
+
+        var response = await client.PostAsync($"/servers?handler={handler}", new FormUrlEncodedContent(
+            [new("id", Guid.NewGuid().ToString()), new("rowVersion", Convert.ToBase64String([1])),
+             new("__RequestVerificationToken", token)]));
+        var responseHtml = WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync());
+        var drawerTag = Regex.Match(
+            responseHtml,
+            "<aside[^>]*data-drawer=\"register-server\"[^>]*>",
+            RegexOptions.Singleline).Value;
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.DoesNotContain(">请输入业务 IP。</span>", responseHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-open", drawerTag, StringComparison.Ordinal);
     }
 
     [Fact]
