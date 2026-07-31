@@ -213,6 +213,101 @@ public sealed class VisualSystemPageTests
     }
 
     [Fact]
+    public async Task Governance_pages_render_chinese_read_only_and_permission_management_contracts()
+    {
+        using var factory = new PresentationFactory();
+        factory.InitializeUser(true, PermissionCode.AuditView);
+        factory.Seed(db =>
+        {
+            db.AuditLogs.Add(new AuditLog
+            {
+                ActorUserId = factory.UserId,
+                Action = "UserPermissionsReplace",
+                ObjectType = "User",
+                ObjectId = "operator",
+                Result = "Success",
+                CorrelationId = "governance-42",
+            });
+            var userId = Guid.NewGuid();
+            db.Users.Add(new AppUser
+            {
+                Id = userId,
+                Username = "operator",
+                PasswordHash = "opaque-password-hash",
+            });
+            db.UserPermissions.Add(new UserPermission
+            {
+                UserId = userId,
+                PermissionCode = PermissionCode.SecretReveal,
+            });
+        });
+        using var client = factory.CreateAuthenticatedClient();
+
+        var auditHtml = WebUtility.HtmlDecode(
+            await client.GetStringAsync("/audit"));
+        var usersHtml = WebUtility.HtmlDecode(
+            await client.GetStringAsync("/admin/users"));
+
+        Assert.Contains("审计日志", auditHtml, StringComparison.Ordinal);
+        Assert.Contains("只读记录", auditHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain("筛选审计", auditHtml, StringComparison.Ordinal);
+        Assert.Contains("data-copy", auditHtml, StringComparison.Ordinal);
+        Assert.Contains("data-copy-target", auditHtml, StringComparison.Ordinal);
+
+        Assert.Contains("用户与权限", usersHtml, StringComparison.Ordinal);
+        Assert.Contains("创建普通用户", usersHtml, StringComparison.Ordinal);
+        Assert.Contains("查看服务器密码", usersHtml, StringComparison.Ordinal);
+        Assert.Contains(
+            $"value=\"{PermissionCode.SecretReveal}\"",
+            usersHtml,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            PermissionCode.SecretReveal + "</label>",
+            usersHtml,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "opaque-password-hash",
+            usersHtml,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("abc123", usersHtml, StringComparison.Ordinal);
+
+        var administratorRow = Regex.Match(
+            usersHtml,
+            "<tr>(?:(?!</tr>).)*presentation-user(?:(?!</tr>).)*</tr>",
+            RegexOptions.Singleline).Value;
+        Assert.Contains(
+            "管理员拥有全部权限",
+            administratorRow,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("<form", administratorRow, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "type=\"checkbox\"",
+            administratorRow,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("重置密码", administratorRow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Shared_copy_control_reads_text_content_and_reports_safe_feedback()
+    {
+        using var factory = new PresentationFactory();
+        using var client = factory.CreateClient();
+
+        var script = await client.GetStringAsync("/js/site.js");
+
+        Assert.Contains("button.dataset.copyTarget", script, StringComparison.Ordinal);
+        Assert.Contains("target?.textContent", script, StringComparison.Ordinal);
+        Assert.Contains("navigator.clipboard.writeText", script, StringComparison.Ordinal);
+        Assert.Contains("\"已复制\"", script, StringComparison.Ordinal);
+        Assert.Contains(
+            "\"复制失败，请手动选择\"",
+            script,
+            StringComparison.Ordinal);
+        Assert.Contains("}, 1800);", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("console.", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Stylesheet_contains_confirmed_tokens_and_reduced_motion()
     {
         using var factory = new PresentationFactory();

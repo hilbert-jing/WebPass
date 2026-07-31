@@ -104,6 +104,7 @@ public sealed class UsersModel(
             await transaction.CommitAsync(ct);
         }
 
+        TempData["StatusMessage"] = $"已创建用户 {user.Username}。";
         return RedirectToPage();
     }
 
@@ -158,6 +159,8 @@ public sealed class UsersModel(
             await transaction.CommitAsync(ct);
         }
 
+        TempData["StatusMessage"] =
+            $"用户 {user.Username} 的密码已重置为系统预设初始密码。";
         return RedirectToPage();
     }
 
@@ -186,6 +189,8 @@ public sealed class UsersModel(
         await auditWriter.WriteAsync(new AuditEntry(UserId(), "UserEnablement", "User", user.Id.ToString(), "Success", null,
             Payload: new Dictionary<string, object?> { ["beforeEnabled"] = before, ["afterEnabled"] = isEnabled }), ct);
         if (transaction is not null) await transaction.CommitAsync(ct);
+        TempData["StatusMessage"] =
+            $"已{(isEnabled ? "启用" : "禁用")}用户 {user.Username}。";
         return RedirectToPage();
     }
 
@@ -213,6 +218,8 @@ public sealed class UsersModel(
             Payload: new Dictionary<string, object?> { ["beforePermissions"] = before, ["afterPermissions"] = requested.Order().ToArray() }), ct);
         if (transaction is not null)
             await transaction.CommitAsync(ct);
+        TempData["StatusMessage"] =
+            $"已更新用户 {user.Username} 的权限。";
         return RedirectToPage();
     }
 

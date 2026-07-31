@@ -1,55 +1,163 @@
 @page "/admin/users"
+@using WebPass.Web.Presentation
 @model WebPass.Web.Pages.Admin.UsersModel
 @{
-    ViewData["Title"] = "Users";
+    ViewData["Title"] = "用户与权限";
+    var openCreation = Request.Method == "POST" &&
+        string.Equals(Request.Query["handler"], "Create", StringComparison.OrdinalIgnoreCase);
 }
 
-<h1>User and permission management</h1>
-<section aria-labelledby="create-user-heading">
-    <h2 id="create-user-heading">Create ordinary user</h2>
-    <form method="post" asp-page-handler="Create">
-        <div asp-validation-summary="All"></div>
-        <label for="username">Username</label>
-        <input id="username" name="username" maxlength="128"
-               autocomplete="off" required />
-        <button type="submit">Create user</button>
-    </form>
-</section>
+<header class="page-header">
+    <div>
+        <h1>用户与权限</h1>
+        <p>创建普通用户，控制账号状态，并按职责分配最小权限。</p>
+    </div>
+    <button type="button"
+            data-drawer-open="create-user"
+            aria-controls="create-user"
+            aria-expanded="@openCreation.ToString().ToLowerInvariant()">
+        创建普通用户
+    </button>
+</header>
 
-<table>
-    <thead><tr><th>User</th><th>Administrator</th><th>Enabled</th><th>Permissions</th><th>Actions</th></tr></thead>
+<div asp-validation-summary="ModelOnly" class="alert-region"></div>
+
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>用户</th>
+            <th>角色</th>
+            <th>状态</th>
+            <th>权限摘要</th>
+            <th>操作</th>
+        </tr>
+    </thead>
     <tbody>
     @foreach (var user in Model.Users)
     {
         <tr>
-            <td>@user.Username</td><td>@user.IsAdministrator</td><td>@user.IsEnabled</td>
-            <td>@string.Join(", ", user.Permissions.Select(x => x.PermissionCode))</td>
+            <td class="data-value">@user.Username</td>
+            <td>@(user.IsAdministrator ? "管理员" : "普通用户")</td>
             <td>
-                @if (!user.IsAdministrator)
+                <span class="status-badge" data-status="@(user.IsEnabled ? "success" : "warning")">
+                    @(user.IsEnabled ? "已启用" : "已停用")
+                </span>
+            </td>
+            <td>
+                @if (user.IsAdministrator)
                 {
-                    <form method="post" asp-page-handler="ResetPassword">
-                        <input type="hidden" name="userId" value="@user.Id" />
-                        <input type="hidden" name="rowVersion"
-                               value="@Convert.ToBase64String(user.RowVersion)" />
-                        <button type="submit">Reset password</button>
-                    </form>
-                    <form method="post" asp-page-handler="SetEnabled">
-                        <input type="hidden" name="userId" value="@user.Id" />
-                        <input type="hidden" name="rowVersion" value="@Convert.ToBase64String(user.RowVersion)" />
-                        <input type="hidden" name="isEnabled" value="@(!user.IsEnabled)" />
-                        <button type="submit">@(user.IsEnabled ? "Disable" : "Enable")</button>
-                    </form>
-                    <form method="post" asp-page-handler="ReplacePermissions">
-                        <input type="hidden" name="userId" value="@user.Id" />
-                        @foreach (var code in Model.GrantablePermissions)
-                        {
-                            <label><input type="checkbox" name="selectedPermissions" value="@code" checked="@user.Permissions.Any(x => x.PermissionCode == code)" />@code</label>
-                        }
-                        <button type="submit">Save permissions</button>
-                    </form>
+                    <span>管理员拥有全部权限</span>
+                }
+                else if (user.Permissions.Count == 0)
+                {
+                    <span>尚未授予权限</span>
+                }
+                else
+                {
+                    @string.Join("、", user.Permissions
+                        .Select(permission => UiLabels.ForPermission(permission.PermissionCode)))
+                }
+            </td>
+            <td>
+                @if (user.IsAdministrator)
+                {
+                    <span>无需单独配置</span>
+                }
+                else
+                {
+                    <details>
+                        <summary>编辑权限</summary>
+                        <form method="post" asp-page-handler="ReplacePermissions">
+                            <input type="hidden" name="userId" value="@user.Id" />
+                            @foreach (var code in Model.GrantablePermissions)
+                            {
+                                var permissionId = $"permission-{user.Id:N}-{code}";
+                                <div>
+                                    <input id="@permissionId"
+                                           type="checkbox"
+                                           name="selectedPermissions"
+                                           value="@code"
+                                           checked="@user.Permissions.Any(permission => permission.PermissionCode == code)" />
+                                    <label for="@permissionId">@UiLabels.ForPermission(code)</label>
+                                </div>
+                            }
+                            <p>保存后，用户 @user.Username 的授权范围会立即更新。</p>
+                            <button type="submit" data-submit-label="正在保存">保存权限</button>
+                        </form>
+                    </details>
+
+                    <details>
+                        <summary>重置密码</summary>
+                        <p>将用户 @user.Username 的密码重置为系统预设初始密码；用户现有权限和启用状态不变。</p>
+                        <form method="post" asp-page-handler="ResetPassword">
+                            <input type="hidden" name="userId" value="@user.Id" />
+                            <input type="hidden"
+                                   name="rowVersion"
+                                   value="@Convert.ToBase64String(user.RowVersion)" />
+                            <button type="submit" data-submit-label="正在重置">确认重置密码</button>
+                        </form>
+                    </details>
+
+                    <details>
+                        <summary>@(user.IsEnabled ? "停用" : "启用")</summary>
+                        <p>
+                            @(user.IsEnabled
+                                ? $"停用用户 {user.Username} 后，该用户将无法登录。"
+                                : $"启用用户 {user.Username} 后，该用户可以重新登录。")
+                        </p>
+                        <form method="post" asp-page-handler="SetEnabled">
+                            <input type="hidden" name="userId" value="@user.Id" />
+                            <input type="hidden"
+                                   name="rowVersion"
+                                   value="@Convert.ToBase64String(user.RowVersion)" />
+                            <input type="hidden" name="isEnabled" value="@(!user.IsEnabled)" />
+                            <button type="submit" data-submit-label="正在更新">
+                                确认@(user.IsEnabled ? "停用" : "启用")
+                            </button>
+                        </form>
+                    </details>
                 }
             </td>
         </tr>
     }
     </tbody>
 </table>
+
+<noscript>
+    <style>
+        #create-user.drawer {
+            position: static;
+            width: 100%;
+            margin-top: 20px;
+            transform: none;
+            visibility: visible;
+        }
+    </style>
+</noscript>
+<aside id="create-user"
+       class="drawer"
+       data-drawer="create-user"
+       @Html.Raw(openCreation ? "data-open" : string.Empty)
+       aria-labelledby="create-user-heading">
+    <header class="page-header">
+        <div>
+            <h2 id="create-user-heading">创建普通用户</h2>
+            <p>新账号使用系统预设初始密码创建，之后可在列表中分配权限。</p>
+        </div>
+        <button type="button" data-drawer-close aria-label="关闭创建用户面板">关闭</button>
+    </header>
+
+    <form method="post" asp-page-handler="Create">
+        <div asp-validation-summary="All" class="alert-region"></div>
+        <div>
+            <label for="username">用户名</label>
+            <input id="username"
+                   name="username"
+                   maxlength="128"
+                   autocomplete="off"
+                   data-drawer-initial-focus
+                   required />
+        </div>
+        <button type="submit" data-submit-label="正在创建">创建用户</button>
+    </form>
+</aside>

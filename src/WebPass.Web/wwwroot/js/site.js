@@ -49,23 +49,31 @@
     });
 
     async function copyText(button) {
-        const target = getDrawer(button.dataset.copy) ||
-            (button.dataset.copy ? document.querySelector(button.dataset.copy) : null);
-        const value = target?.value ?? target?.textContent ?? "";
-        const text = value.trim();
-        if (!text || !navigator.clipboard) return;
-
+        const selector = button.dataset.copyTarget;
+        const target = selector ? document.querySelector(selector) : null;
+        const text = target?.textContent?.trim() ?? "";
         const originalLabel = button.textContent;
-        try {
-            await navigator.clipboard.writeText(text);
-            button.textContent = button.dataset.copyLabel || "已复制";
-        } catch {
-            button.textContent = button.dataset.copyErrorLabel || "复制失败";
+
+        const restoreLabel = () => {
+            window.setTimeout(() => {
+                button.textContent = originalLabel;
+            }, 1800);
+        };
+
+        if (!text || !navigator.clipboard?.writeText) {
+            button.textContent = "复制失败，请手动选择";
+            restoreLabel();
+            return;
         }
 
-        window.setTimeout(() => {
-            button.textContent = originalLabel;
-        }, 1800);
+        try {
+            await navigator.clipboard.writeText(text);
+            button.textContent = "已复制";
+        } catch {
+            button.textContent = "复制失败，请手动选择";
+        }
+
+        restoreLabel();
     }
 
     document.querySelectorAll("[data-nav-toggle]").forEach(button => {
