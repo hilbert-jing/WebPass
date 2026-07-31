@@ -24,7 +24,7 @@ public sealed class IndexModel(IImportService imports) : PageModel
     {
         if (Upload is null || Upload.Length == 0)
         {
-            ModelState.AddModelError(string.Empty, "Select a CSV or XLSX file.");
+            ModelState.AddModelError(string.Empty, "请选择 CSV 或 XLSX 文件。");
             return Page();
         }
 
@@ -36,7 +36,9 @@ public sealed class IndexModel(IImportService imports) : PageModel
         };
         if (type is null || !ContentTypeAllowed(type.Value, Upload.ContentType))
         {
-            ModelState.AddModelError(string.Empty, "Only CSV and XLSX inventory files are accepted.");
+            ModelState.AddModelError(
+                string.Empty,
+                "仅支持 CSV 和 XLSX 服务器清单文件。");
             return Page();
         }
 
@@ -51,7 +53,9 @@ public sealed class IndexModel(IImportService imports) : PageModel
             or InvalidOperationException
             or ArgumentException)
         {
-            ModelState.AddModelError(string.Empty, exception.Message);
+            ModelState.AddModelError(
+                string.Empty,
+                "无法读取导入文件，请检查格式、大小和内容。");
             return Page();
         }
     }
@@ -64,7 +68,7 @@ public sealed class IndexModel(IImportService imports) : PageModel
         {
             var result = await imports.CommitAsync(previewId, UserId(), ct);
             TempData["ImportResult"] =
-                $"Created {result.CreatedCount}, updated {result.UpdatedCount}, skipped {result.SkippedCount}.";
+                $"已新增 {result.CreatedCount} 项，更新 {result.UpdatedCount} 项，跳过 {result.SkippedCount} 项";
             return RedirectToPage();
         }
         catch (UnauthorizedAccessException)
@@ -75,7 +79,9 @@ public sealed class IndexModel(IImportService imports) : PageModel
             exception is InvalidOperationException
             or KeyNotFoundException)
         {
-            ModelState.AddModelError(string.Empty, exception.Message);
+            ModelState.AddModelError(
+                string.Empty,
+                "导入预览已失效，请重新上传文件。");
             return Page();
         }
     }

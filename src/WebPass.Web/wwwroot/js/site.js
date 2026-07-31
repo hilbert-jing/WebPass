@@ -102,4 +102,55 @@
         button.disabled = true;
         button.textContent = button.dataset.submitLabel;
     });
+
+    document.querySelectorAll("[data-upload-zone]").forEach(zone => {
+        const input = zone.querySelector("[data-upload-input]");
+        const fileName = zone.querySelector("[data-upload-name]");
+        if (!(input instanceof HTMLInputElement) || input.type !== "file") return;
+
+        const updateFileName = () => {
+            if (!fileName) return;
+            fileName.textContent = input.files?.[0]?.name || "尚未选择文件";
+        };
+
+        input.addEventListener("change", updateFileName);
+
+        ["dragenter", "dragover"].forEach(eventName => {
+            zone.addEventListener(eventName, event => {
+                event.preventDefault();
+                zone.setAttribute("data-dragging", "");
+            });
+        });
+
+        zone.addEventListener("dragleave", () => {
+            zone.removeAttribute("data-dragging");
+        });
+
+        zone.addEventListener("drop", event => {
+            event.preventDefault();
+            zone.removeAttribute("data-dragging");
+            const files = event.dataTransfer?.files;
+            if (!files || files.length !== 1) return;
+
+            const transfer = new DataTransfer();
+            transfer.items.add(files[0]);
+            input.files = transfer.files;
+            updateFileName();
+        });
+    });
+
+    document.querySelectorAll("[data-export-format]").forEach(format => {
+        if (!(format instanceof HTMLSelectElement)) return;
+        const submit = format.form?.querySelector("[data-export-submit]");
+        if (!(submit instanceof HTMLButtonElement)) return;
+
+        const updateExportLabel = () => {
+            submit.textContent = format.value === "Csv"
+                ? "下载 CSV"
+                : "下载 XLSX";
+        };
+
+        format.addEventListener("change", updateExportLabel);
+        updateExportLabel();
+    });
 })();

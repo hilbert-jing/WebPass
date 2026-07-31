@@ -23,6 +23,23 @@ namespace WebPass.IntegrationTests.Importing;
 public sealed class ImportPageTests
 {
     [Fact]
+    public async Task Import_page_renders_chinese_upload_workspace()
+    {
+        using var factory = new ImportPageFactory();
+        factory.InitializeData();
+        using var client = factory.CreateAuthenticatedClient();
+
+        var html = await client.GetStringAsync("/imports");
+
+        Assert.Contains("导入服务器数据", html, StringComparison.Ordinal);
+        Assert.Contains("最大 10 MB，最多 5,000 行", html, StringComparison.Ordinal);
+        Assert.Contains("class=\"upload-zone\"", html, StringComparison.Ordinal);
+        Assert.Contains("data-upload-zone", html, StringComparison.Ordinal);
+        Assert.Contains("data-upload-input", html, StringComparison.Ordinal);
+        Assert.Contains("accept=\".csv,.xlsx\"", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Import_page_requires_antiforgery_before_processing_upload()
     {
         using var factory = new ImportPageFactory();
@@ -57,8 +74,117 @@ public sealed class ImportPageTests
         var responseHtml = await response.Content.ReadAsStringAsync();
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Contains("Create: 1", responseHtml, StringComparison.Ordinal);
+        Assert.Contains("新增", responseHtml, StringComparison.Ordinal);
+        Assert.Contains(">1<", responseHtml, StringComparison.Ordinal);
+        Assert.Contains("错误", responseHtml, StringComparison.Ordinal);
         Assert.DoesNotContain("server-password", responseHtml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Blocking_preview_shows_safe_errors_without_commit_or_raw_password()
+    {
+        using var factory = new ImportPageFactory();
+        factory.InitializeData();
+        using var client = factory.CreateAuthenticatedClient();
+        var html = await client.GetStringAsync("/imports");
+        var token = AntiforgeryToken(html);
+        using var form = new MultipartFormDataContent();
+        form.Add(new StringContent(token), "__RequestVerificationToken");
+        const string rawPassword = "never-render-this-password";
+        const string csv =
+            "BusinessIp,Location,AliveStatus,ComputerName,SystemName,OperatingSystemVersion,DatabaseVersion,Notes,Password\r\n" +
+            $"not-an-ip,DC,Unknown,server-10,ERP,,,,{rawPassword}\r\n";
+        form.Add(new StringContent(csv), "Upload", "servers.csv");
+
+        using var response = await client.PostAsync(
+            "/imports?handler=Preview",
+            form);
+        var responseHtml = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("class=\"import-errors", responseHtml, StringComparison.Ordinal);
+        Assert.Contains("<th>行号</th>", responseHtml, StringComparison.Ordinal);
+        Assert.Contains("<th>字段</th>", responseHtml, StringComparison.Ordinal);
+        Assert.Contains("<th>原因</th>", responseHtml, StringComparison.Ordinal);
+        Assert.Contains("必须修复文件后重新上传", responseHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain("提交导入", responseHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain(rawPassword, responseHtml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Missing_upload_uses_chinese_validation_message()
+    {
+        using var factory = new ImportPageFactory();
+        factory.InitializeData();
+        using var client = factory.CreateAuthenticatedClient();
+        var html = await client.GetStringAsync("/imports");
+        var token = AntiforgeryToken(html);
+        using var form = new MultipartFormDataContent();
+        form.Add(new StringContent(token), "__RequestVerificationToken");
+
+        using var response = await client.PostAsync(
+            "/imports?handler=Preview",
+            form);
+        var responseHtml = WebUtility.HtmlDecode(
+            await response.Content.ReadAsStringAsync());
+
+        Assert.Contains(
+            "请选择 CSV 或 XLSX 文件。",
+            responseHtml,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Commit_result_is_shown_in_chinese_after_redirect()
+    {
+        using var factory = new ImportPageFactory();
+        factory.InitializeData();
+        using var client = factory.CreateAuthenticatedClient();
+        var html = await client.GetStringAsync("/imports");
+        using var previewForm = new MultipartFormDataContent();
+        previewForm.Add(
+            new StringContent(AntiforgeryToken(html)),
+            "__RequestVerificationToken");
+        const string csv =
+            "BusinessIp,Location,AliveStatus,ComputerName,SystemName,OperatingSystemVersion,DatabaseVersion,Notes,Password\r\n" +
+            "10.0.0.10,DC,Unknown,server-10,ERP,,,,server-password\r\n";
+        previewForm.Add(new StringContent(csv), "Upload", "servers.csv");
+        using var previewResponse = await client.PostAsync(
+            "/imports?handler=Preview",
+            previewForm);
+        var previewHtml = await previewResponse.Content.ReadAsStringAsync();
+        var previewId = Regex.Match(
+            previewHtml,
+            "name=\"previewId\"[^>]*value=\"([^\"]+)\"")
+            .Groups[1]
+            .Value;
+
+        using var commitResponse = await client.PostAsync(
+            "/imports?handler=Commit",
+            new FormUrlEncodedContent(
+            [
+                new("__RequestVerificationToken", AntiforgeryToken(previewHtml)),
+                new("previewId", previewId),
+            ]));
+        var resultHtml = WebUtility.HtmlDecode(
+            await client.GetStringAsync("/imports"));
+
+        Assert.Equal(HttpStatusCode.Redirect, commitResponse.StatusCode);
+        Assert.Contains(
+            "已新增 1 项，更新 0 项，跳过 0 项",
+            resultHtml,
+            StringComparison.Ordinal);
+    }
+
+    private static string AntiforgeryToken(string html)
+    {
+        var token = Regex.Match(
+            html,
+            "name=\"__RequestVerificationToken\"[^>]*value=\"([^\"]+)\"")
+            .Groups[1]
+            .Value;
+        Assert.False(string.IsNullOrEmpty(token));
+        return token;
     }
 
     private sealed class ImportPageFactory : WebApplicationFactory<Program>

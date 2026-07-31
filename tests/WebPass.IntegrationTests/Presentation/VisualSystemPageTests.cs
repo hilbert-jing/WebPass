@@ -244,6 +244,27 @@ public sealed class VisualSystemPageTests
     }
 
     [Fact]
+    public async Task Data_transfer_script_progressively_enhances_upload_and_export_controls()
+    {
+        using var factory = new PresentationFactory();
+        using var client = factory.CreateClient();
+
+        var script = await client.GetStringAsync("/js/site.js");
+
+        Assert.Contains("[data-upload-zone]", script, StringComparison.Ordinal);
+        Assert.Contains("[data-upload-input]", script, StringComparison.Ordinal);
+        Assert.Contains("dragenter", script, StringComparison.Ordinal);
+        Assert.Contains("dragleave", script, StringComparison.Ordinal);
+        Assert.Contains("drop", script, StringComparison.Ordinal);
+        Assert.Contains("files.length !== 1", script, StringComparison.Ordinal);
+        Assert.Contains("new DataTransfer()", script, StringComparison.Ordinal);
+        Assert.Contains("[data-export-format]", script, StringComparison.Ordinal);
+        Assert.Contains("[data-export-submit]", script, StringComparison.Ordinal);
+        Assert.Contains("下载 CSV", script, StringComparison.Ordinal);
+        Assert.Contains("下载 XLSX", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Tablet_shell_keeps_post_logout_control_visible()
     {
         using var factory = new PresentationFactory();

@@ -24,6 +24,27 @@ namespace WebPass.IntegrationTests.Exporting;
 public sealed class ExportPageTests
 {
     [Fact]
+    public async Task Export_page_renders_chinese_secret_free_scope()
+    {
+        using var factory = new ExportPageFactory();
+        factory.InitializeData();
+        using var client = factory.CreateAuthenticatedClient();
+
+        var html = WebUtility.HtmlDecode(
+            await client.GetStringAsync("/exports"));
+
+        Assert.Contains("导出服务器数据", html, StringComparison.Ordinal);
+        Assert.Contains("普通导出不包含服务器密码", html, StringComparison.Ordinal);
+        Assert.Contains("class=\"export-scope", html, StringComparison.Ordinal);
+        Assert.Contains("data-export-format", html, StringComparison.Ordinal);
+        Assert.Contains("data-export-submit", html, StringComparison.Ordinal);
+        Assert.Contains("存活", html, StringComparison.Ordinal);
+        Assert.Contains("异常", html, StringComparison.Ordinal);
+        Assert.Contains("停用", html, StringComparison.Ordinal);
+        Assert.Contains("下载导出文件", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Download_requires_antiforgery()
     {
         using var factory = new ExportPageFactory();
@@ -98,6 +119,39 @@ public sealed class ExportPageTests
             Assert.Equal((byte)'P', content[0]);
             Assert.Equal((byte)'K', content[1]);
         }
+    }
+
+    [Fact]
+    public async Task Invalid_export_parameters_show_generic_chinese_error()
+    {
+        using var factory = new ExportPageFactory();
+        factory.InitializeData();
+        using var client = factory.CreateAuthenticatedClient();
+        var html = await client.GetStringAsync("/exports");
+        var token = Regex.Match(
+            html,
+            "name=\"__RequestVerificationToken\"[^>]*value=\"([^\"]+)\"")
+            .Groups[1]
+            .Value;
+
+        using var response = await client.PostAsync(
+            "/exports?handler=Download",
+            new FormUrlEncodedContent(
+            [
+                new("__RequestVerificationToken", token),
+                new("Format", "invalid-format"),
+            ]));
+        var responseHtml = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains(
+            "无法导出：请检查筛选条件和文件格式。",
+            responseHtml,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "invalid-format",
+            responseHtml,
+            StringComparison.Ordinal);
     }
 
     private sealed class ExportPageFactory : WebApplicationFactory<Program>

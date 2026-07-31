@@ -1,40 +1,105 @@
 @page "/imports"
 @model WebPass.Web.Pages.Imports.IndexModel
 @{
-    ViewData["Title"] = "Import servers";
+    ViewData["Title"] = "导入服务器数据";
 }
 
-<h1>Import servers</h1>
-<p>Upload an IPv4 inventory in CSV or XLSX format. Maximum 10 MB and 5,000 data rows.</p>
-<div asp-validation-summary="ModelOnly"></div>
-<form method="post" enctype="multipart/form-data" asp-page-handler="Preview">
-    <label asp-for="Upload"></label>
-    <input asp-for="Upload" type="file" accept=".csv,.xlsx" />
-    <button type="submit">Preview import</button>
+<header class="page-header">
+    <div>
+        <h1>导入服务器数据</h1>
+        <p>先预览变更，再提交服务器清单。支持 CSV 与 XLSX，最大 10 MB，最多 5,000 行。</p>
+    </div>
+</header>
+
+@if (TempData["ImportResult"] is string importResult)
+{
+    <p class="toast-region" role="status">@importResult</p>
+}
+
+<div asp-validation-summary="ModelOnly" class="alert-region"></div>
+
+<form method="post"
+      enctype="multipart/form-data"
+      asp-page-handler="Preview"
+      class="form-section">
+    <label asp-for="Upload"
+           class="upload-zone"
+           data-upload-zone
+           tabindex="0">
+        <strong>选择或拖入服务器清单</strong>
+        <span>CSV 或 XLSX · 最大 10 MB，最多 5,000 行</span>
+        <span data-upload-name>尚未选择文件</span>
+        <input asp-for="Upload"
+               type="file"
+               accept=".csv,.xlsx"
+               data-upload-input />
+    </label>
+    <button type="submit" data-submit-label="正在生成预览">预览导入</button>
 </form>
 
 @if (Model.Preview is { } preview)
 {
-    <section>
-        <h2>Preview</h2>
-        <p>Total: @preview.TotalRows</p>
-        <p>Create: @preview.CreateCount</p>
-        <p>Update: @preview.UpdateCount</p>
-        <p>Skip: @preview.SkipCount</p>
+    <section aria-labelledby="import-preview-title">
+        <header class="page-header">
+            <div>
+                <h2 id="import-preview-title">导入预览</h2>
+                <p>核对本次清单产生的变更；只有没有阻断错误时才能提交。</p>
+            </div>
+        </header>
+        <dl class="import-summary">
+            <div>
+                <dt>新增</dt>
+                <dd>@preview.CreateCount</dd>
+            </div>
+            <div>
+                <dt>更新</dt>
+                <dd>@preview.UpdateCount</dd>
+            </div>
+            <div>
+                <dt>跳过</dt>
+                <dd>@preview.SkipCount</dd>
+            </div>
+            <div>
+                <dt>错误</dt>
+                <dd>@preview.Errors.Count</dd>
+            </div>
+        </dl>
         @if (preview.Errors.Count > 0)
         {
-            <ul>
-            @foreach (var error in preview.Errors)
-            {
-                <li>Row @error.RowNumber, @error.Field: @error.Message</li>
-            }
-            </ul>
+            <div class="import-errors">
+                <h3>需要修复的内容</h3>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>行号</th>
+                            <th>字段</th>
+                            <th>原因</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var error in preview.Errors)
+                    {
+                        <tr>
+                            <td>@error.RowNumber</td>
+                            <td>@error.Field</td>
+                            <td>@error.Message</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
         }
-        @if (!preview.HasBlockingErrors)
+        @if (preview.HasBlockingErrors)
+        {
+            <p class="alert-region" role="alert">
+                当前预览包含阻断错误，必须修复文件后重新上传。
+            </p>
+        }
+        else
         {
             <form method="post" asp-page-handler="Commit">
                 <input type="hidden" name="previewId" value="@preview.Id" />
-                <button type="submit">Commit import</button>
+                <button type="submit" data-submit-label="正在导入">提交导入</button>
             </form>
         }
     </section>

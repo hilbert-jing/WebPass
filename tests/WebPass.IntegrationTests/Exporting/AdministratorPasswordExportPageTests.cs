@@ -65,9 +65,29 @@ public sealed class AdministratorPasswordExportPageTests
         var token = AntiforgeryToken(html);
 
         Assert.Contains(
-            "plaintext server passwords",
+            "导出服务器密码",
             html,
-            StringComparison.OrdinalIgnoreCase);
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "文件包含明文服务器密码",
+            html,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "class=\"risk-callout",
+            html,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "固定格式",
+            html,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "XLSX",
+            html,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "确认并导出密码",
+            html,
+            StringComparison.Ordinal);
         Assert.DoesNotContain(
             "name=\"Format\"",
             html,
@@ -89,6 +109,36 @@ public sealed class AdministratorPasswordExportPageTests
             "ReturnUrl=",
             response.Headers.Location.OriginalString,
             StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Invalid_password_export_parameters_show_generic_chinese_error()
+    {
+        using var factory = new PasswordExportPageFactory();
+        factory.InitializeData();
+        using var client = factory.CreateAuthenticatedClient(
+            factory.AdministratorId);
+        var html = await client.GetStringAsync("/admin/password-export");
+        var token = AntiforgeryToken(html);
+
+        using var response = await client.PostAsync(
+            "/admin/password-export?handler=Download",
+            new FormUrlEncodedContent(
+            [
+                new("__RequestVerificationToken", token),
+                new("Query.Status", "invalid-status"),
+            ]));
+        var responseHtml = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains(
+            "无法导出服务器密码：请检查筛选条件。",
+            responseHtml,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "invalid-status",
+            responseHtml,
+            StringComparison.Ordinal);
     }
 
     [Fact]
