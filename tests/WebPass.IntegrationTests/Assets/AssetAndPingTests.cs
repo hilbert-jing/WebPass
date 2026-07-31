@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -288,6 +289,237 @@ public sealed class AssetAndPingTests
         Assert.Contains("Ping 可达 · 12 ms", responseHtml, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Direct_ping_route_rejects_get_with_method_not_allowed()
+    {
+        using var factory = new ServerPageFactory(
+            NewUser(),
+            PermissionCode.AssetView,
+            PermissionCode.PingExecute);
+        factory.InitializeData();
+        await factory.AddSubnetAsync();
+        var asset = await factory.AddAssetAsync("10.0.0.9", "HQ", [1]);
+        using var client = factory.CreateAuthenticatedClient();
+
+        var response = await client.GetAsync($"/servers/{asset.Id}/ping");
+
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Ping_feedback_is_scoped_to_the_target_row_and_success_alone_offers_mark_alive(
+        bool useDirectRoute)
+    {
+        using var factory = new ServerPageFactory(
+            NewUser(),
+            PermissionCode.AssetView,
+            PermissionCode.PingExecute,
+            PermissionCode.StatusMarkAlive);
+        factory.InitializeData();
+        await factory.AddSubnetAsync();
+        var target = await factory.AddAssetAsync(
+            "10.0.0.9",
+            "Target rack",
+            [1],
+            AliveStatus.Fault,
+            "target-computer",
+            "Target system");
+        var other = await factory.AddAssetAsync(
+            "10.0.0.10",
+            "Other rack",
+            [2],
+            AliveStatus.Unknown,
+            "other-computer",
+            "Other system");
+        using var client = factory.CreateAuthenticatedClient();
+        var token = AntiforgeryToken(await client.GetStringAsync("/servers"));
+        var endpoint = useDirectRoute
+            ? $"/servers/{target.Id}/ping"
+            : "/servers?handler=Ping";
+
+        var response = await PostPingAsync(client, endpoint, target.Id, token);
+        var responseHtml = WebUtility.HtmlDecode(
+            await client.GetStringAsync(response.Headers.Location!));
+        var targetRow = ServerRow(responseHtml, target.Id);
+        var otherRow = ServerRow(responseHtml, other.Id);
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Contains("data-ping-feedback", targetRow, StringComparison.Ordinal);
+        Assert.Contains("Ping 可达 · 12 ms", targetRow, StringComparison.Ordinal);
+        Assert.Contains(">标记为存活<", targetRow, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-ping-feedback", otherRow, StringComparison.Ordinal);
+        Assert.DoesNotContain(">标记为存活<", otherRow, StringComparison.Ordinal);
+        Assert.Equal(
+            AliveStatus.Fault,
+            (await factory.GetAssetsAsync()).Single(x => x.Id == target.Id).AliveStatus);
+    }
+
+    [Theory]
+    [InlineData("Timeout", "Ping 超时 · 无延迟数据")]
+    [InlineData("Unreachable", "Ping 不可达 · 无延迟数据")]
+    [InlineData("UnexpectedOutcome", "Ping 检测失败 · 无延迟数据")]
+    public async Task Non_successful_ping_feedback_has_no_mark_alive_action(
+        string outcome,
+        string expectedFeedback)
+    {
+        using var factory = new ServerPageFactory(
+            NewUser(),
+            PermissionCode.AssetView,
+            PermissionCode.PingExecute,
+            PermissionCode.StatusMarkAlive)
+        {
+            PingResponse = new PingTransportResult(outcome, null, "SafeCode"),
+        };
+        factory.InitializeData();
+        await factory.AddSubnetAsync();
+        var asset = await factory.AddAssetAsync("10.0.0.9", "HQ", [1]);
+        using var client = factory.CreateAuthenticatedClient();
+        var token = AntiforgeryToken(await client.GetStringAsync("/servers"));
+
+        var response = await PostPingAsync(
+            client,
+            "/servers?handler=Ping",
+            asset.Id,
+            token);
+        var responseHtml = WebUtility.HtmlDecode(
+            await client.GetStringAsync(response.Headers.Location!));
+        var row = ServerRow(responseHtml, asset.Id);
+
+        Assert.Contains(expectedFeedback, row, StringComparison.Ordinal);
+        Assert.DoesNotContain(">标记为存活<", row, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Ping_invalid_target_returns_fixed_chinese_bad_request_without_internal_details(
+        bool useDirectRoute)
+    {
+        using var factory = new ServerPageFactory(
+            NewUser(),
+            PermissionCode.AssetView,
+            PermissionCode.PingExecute);
+        factory.InitializeData();
+        await factory.AddSubnetAsync();
+        var asset = await factory.AddAssetAsync("10.0.0.9", "HQ", [1]);
+        await factory.DisableSubnetAsync();
+        using var client = factory.CreateAuthenticatedClient();
+        var token = AntiforgeryToken(await client.GetStringAsync("/servers"));
+        var endpoint = useDirectRoute
+            ? $"/servers/{asset.Id}/ping"
+            : "/servers?handler=Ping";
+
+        var response = await PostPingAsync(client, endpoint, asset.Id, token);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("无法检测此服务器：目标无效或当前不可用。", body);
+        Assert.DoesNotContain(
+            "The Ping target is not a registered address in an enabled subnet.",
+            body,
+            StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Ping_rate_limit_returns_shared_safe_chinese_feedback(
+        bool useDirectRoute)
+    {
+        using var factory = new ServerPageFactory(
+            NewUser(),
+            PermissionCode.AssetView,
+            PermissionCode.PingExecute);
+        factory.InitializeData();
+        await factory.AddSubnetAsync();
+        var asset = await factory.AddAssetAsync("10.0.0.9", "HQ", [1]);
+        using var client = factory.CreateAuthenticatedClient();
+        var token = AntiforgeryToken(await client.GetStringAsync("/servers"));
+        var endpoint = useDirectRoute
+            ? $"/servers/{asset.Id}/ping"
+            : "/servers?handler=Ping";
+
+        HttpResponseMessage? response = null;
+        for (var attempt = 0; attempt < 6; attempt++)
+        {
+            response?.Dispose();
+            response = await PostPingAsync(client, endpoint, asset.Id, token);
+            if (attempt < 5)
+                Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        }
+
+        using (response)
+        {
+            Assert.NotNull(response);
+            Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
+            Assert.Equal(
+                "Ping 操作过于频繁，请稍后重试。",
+                await response.Content.ReadAsStringAsync());
+        }
+        Assert.Equal(5, await factory.GetPingResultCountAsync());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Ping_not_found_returns_shared_safe_chinese_feedback(
+        bool useDirectRoute)
+    {
+        using var factory = new ServerPageFactory(
+            NewUser(),
+            PermissionCode.AssetView,
+            PermissionCode.PingExecute);
+        factory.InitializeData();
+        using var client = factory.CreateAuthenticatedClient();
+        var missingId = Guid.NewGuid();
+        var token = AntiforgeryToken(await client.GetStringAsync("/servers"));
+        var endpoint = useDirectRoute
+            ? $"/servers/{missingId}/ping"
+            : "/servers?handler=Ping";
+
+        var response = await PostPingAsync(client, endpoint, missingId, token);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal("未找到要检测的服务器。", body);
+        Assert.DoesNotContain("Server asset not found.", body, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Ping_unknown_failure_returns_fixed_message_without_exception_text(
+        bool useDirectRoute)
+    {
+        using var factory = new ServerPageFactory(
+            NewUser(),
+            PermissionCode.AssetView,
+            PermissionCode.PingExecute)
+        {
+            FailPingPersistence = true,
+        };
+        factory.InitializeData();
+        await factory.AddSubnetAsync();
+        var asset = await factory.AddAssetAsync("10.0.0.9", "HQ", [1]);
+        using var client = factory.CreateAuthenticatedClient();
+        var token = AntiforgeryToken(await client.GetStringAsync("/servers"));
+        var endpoint = useDirectRoute
+            ? $"/servers/{asset.Id}/ping"
+            : "/servers?handler=Ping";
+
+        var response = await PostPingAsync(client, endpoint, asset.Id, token);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.Equal("Ping 检测失败，请稍后重试。", body);
+        Assert.DoesNotContain(
+            ThrowOnPingSaveInterceptor.InternalFailure,
+            body,
+            StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("MarkAlive", PermissionCode.StatusMarkAlive, "服务器已标记为存活。")]
     [InlineData("Archive", PermissionCode.AssetArchive, "服务器已归档。")]
@@ -312,6 +544,104 @@ public sealed class AssetAndPingTests
 
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
         Assert.Contains(expectedMessage, responseHtml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Archive_confirmation_identifies_target_explains_impact_and_preserves_secure_payload()
+    {
+        using var factory = new ServerPageFactory(
+            NewUser(),
+            PermissionCode.AssetView,
+            PermissionCode.AssetArchive);
+        factory.InitializeData();
+        await factory.AddSubnetAsync();
+        var asset = await factory.AddAssetAsync(
+            "10.0.0.9",
+            "HQ",
+            [1, 2],
+            AliveStatus.Fault,
+            "archive-computer",
+            "Archive system");
+        using var client = factory.CreateAuthenticatedClient();
+
+        var html = WebUtility.HtmlDecode(await client.GetStringAsync("/servers"));
+        var row = ServerRow(html, asset.Id);
+
+        Assert.Contains("确认归档服务器", row, StringComparison.Ordinal);
+        Assert.Contains("10.0.0.9", row, StringComparison.Ordinal);
+        Assert.Contains("archive-computer", row, StringComparison.Ordinal);
+        Assert.Contains("Archive system", row, StringComparison.Ordinal);
+        Assert.Contains(
+            "归档后，该服务器将从默认资产列表中隐藏，历史记录与审计记录仍会保留。",
+            row,
+            StringComparison.Ordinal);
+        Assert.Contains(">归档服务器<", row, StringComparison.Ordinal);
+        Assert.Contains($"name=\"id\" value=\"{asset.Id}\"", row, StringComparison.Ordinal);
+        Assert.Contains(
+            $"name=\"rowVersion\" value=\"{Convert.ToBase64String([1, 2])}\"",
+            row,
+            StringComparison.Ordinal);
+        Assert.Contains("name=\"__RequestVerificationToken\"", row, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Archive_stale_row_version_returns_conflict_without_archiving_or_leaking_exception()
+    {
+        using var factory = new ServerPageFactory(
+            NewUser(),
+            PermissionCode.AssetView,
+            PermissionCode.AssetArchive);
+        factory.InitializeData();
+        await factory.AddSubnetAsync();
+        var asset = await factory.AddAssetAsync("10.0.0.9", "HQ", [1]);
+        using var client = factory.CreateAuthenticatedClient();
+        var token = AntiforgeryToken(await client.GetStringAsync("/servers"));
+
+        var response = await client.PostAsync(
+            "/servers?handler=Archive",
+            new FormUrlEncodedContent(
+            [
+                new("id", asset.Id.ToString()),
+                new("rowVersion", Convert.ToBase64String([9])),
+                new("__RequestVerificationToken", token),
+            ]));
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal("该服务器已被其他用户修改，请刷新后重试。", body);
+        Assert.False((await factory.GetAssetsAsync()).Single().IsArchived);
+        Assert.DoesNotContain(
+            "The server was changed by another user.",
+            body,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Archive_invalid_row_version_returns_safe_bad_request_without_exception_text()
+    {
+        using var factory = new ServerPageFactory(
+            NewUser(),
+            PermissionCode.AssetView,
+            PermissionCode.AssetArchive);
+        factory.InitializeData();
+        await factory.AddSubnetAsync();
+        var asset = await factory.AddAssetAsync("10.0.0.9", "HQ", [1]);
+        using var client = factory.CreateAuthenticatedClient();
+        var token = AntiforgeryToken(await client.GetStringAsync("/servers"));
+
+        var response = await client.PostAsync(
+            "/servers?handler=Archive",
+            new FormUrlEncodedContent(
+            [
+                new("id", asset.Id.ToString()),
+                new("rowVersion", "internal-row-version-secret"),
+                new("__RequestVerificationToken", token),
+            ]));
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("请求无效，请刷新页面后重试。", body);
+        Assert.DoesNotContain("row version", body, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -345,10 +675,19 @@ public sealed class AssetAndPingTests
         Assert.DoesNotContain(">标记存活<", html, StringComparison.Ordinal);
         Assert.DoesNotContain(">归档<", html, StringComparison.Ordinal);
 
-        var response = await client.PostAsync("/servers?handler=Ping", new FormUrlEncodedContent(
+        var inventoryResponse = await client.PostAsync("/servers?handler=Ping", new FormUrlEncodedContent(
+            [new("id", asset.Id.ToString()), new("__RequestVerificationToken", token)]));
+        var directResponse = await client.PostAsync($"/servers/{asset.Id}/ping", new FormUrlEncodedContent(
             [new("id", asset.Id.ToString()), new("__RequestVerificationToken", token)]));
 
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, inventoryResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, directResponse.StatusCode);
+        Assert.Equal(
+            "没有权限执行 Ping。",
+            await inventoryResponse.Content.ReadAsStringAsync());
+        Assert.Equal(
+            "没有权限执行 Ping。",
+            await directResponse.Content.ReadAsStringAsync());
     }
 
     [Fact]
@@ -679,6 +1018,40 @@ public sealed class AssetAndPingTests
     private static WebPassDbContext NewDatabase() => new(new DbContextOptionsBuilder<WebPassDbContext>()
         .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
 
+    private static string AntiforgeryToken(string html)
+    {
+        var token = Regex.Match(
+            html,
+            "name=\"__RequestVerificationToken\"[^>]*value=\"([^\"]+)\"")
+            .Groups[1]
+            .Value;
+        Assert.False(string.IsNullOrEmpty(token));
+        return token;
+    }
+
+    private static Task<HttpResponseMessage> PostPingAsync(
+        HttpClient client,
+        string endpoint,
+        Guid assetId,
+        string antiforgeryToken) =>
+        client.PostAsync(
+            endpoint,
+            new FormUrlEncodedContent(
+            [
+                new("id", assetId.ToString()),
+                new("__RequestVerificationToken", antiforgeryToken),
+            ]));
+
+    private static string ServerRow(string html, Guid assetId)
+    {
+        var match = Regex.Match(
+            html,
+            $"<tr[^>]*data-asset-id=\"{assetId}\"[^>]*>.*?</tr>",
+            RegexOptions.Singleline);
+        Assert.True(match.Success, $"Could not find the server row for {assetId}.");
+        return match.Value;
+    }
+
     private static async Task<AppUser> AddUserAsync(WebPassDbContext db, params string[] permissions)
     {
         var user = NewUser();
@@ -725,17 +1098,29 @@ public sealed class AssetAndPingTests
             }
         }
     }
-    private sealed class ServerPageFactory(AppUser user, params string[] permissions) : WebApplicationFactory<Program>
+    private sealed class ServerPageFactory : WebApplicationFactory<Program>
     {
+        private readonly AppUser _user;
         private readonly string _databaseName = Guid.NewGuid().ToString("N");
-        private readonly string[] _permissions = permissions;
+        private readonly string[] _permissions;
+
+        public ServerPageFactory(AppUser user, params string[] permissions)
+        {
+            _user = user;
+            _permissions = permissions;
+        }
+
+        public PingTransportResult PingResponse { get; init; } =
+            new("Success", 12, null);
+
+        public bool FailPingPersistence { get; init; }
 
         public void InitializeData()
         {
             using var scope = Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<WebPassDbContext>();
-            db.Users.Add(user);
-            db.UserPermissions.AddRange(_permissions.Select(code => new UserPermission { UserId = user.Id, PermissionCode = code }));
+            db.Users.Add(_user);
+            db.UserPermissions.AddRange(_permissions.Select(code => new UserPermission { UserId = _user.Id, PermissionCode = code }));
             db.SaveChanges();
         }
         public async Task<Subnet> GetOnlySubnetAsync()
@@ -744,7 +1129,13 @@ public sealed class AssetAndPingTests
             return await scope.ServiceProvider.GetRequiredService<WebPassDbContext>().Subnets.SingleAsync();
         }
 
-        public async Task<ServerAsset> AddAssetAsync(string ip, string location, byte[] rowVersion)
+        public async Task<ServerAsset> AddAssetAsync(
+            string ip,
+            string location,
+            byte[] rowVersion,
+            AliveStatus aliveStatus = AliveStatus.Unknown,
+            string computerName = "current",
+            string systemName = "Current")
         {
             using var scope = Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<WebPassDbContext>();
@@ -755,8 +1146,9 @@ public sealed class AssetAndPingTests
                 BusinessIp = ip,
                 BusinessIpNumber = 167772169,
                 Location = location,
-                ComputerName = "current",
-                SystemName = "Current",
+                AliveStatus = aliveStatus,
+                ComputerName = computerName,
+                SystemName = systemName,
                 RowVersion = rowVersion,
             };
             db.ServerAssets.Add(asset);
@@ -772,7 +1164,7 @@ public sealed class AssetAndPingTests
                 [
                     new Claim(
                         ClaimTypes.NameIdentifier,
-                        user.Id.ToString()),
+                        _user.Id.ToString()),
                     new Claim(
                         LoginModel.SessionStartedClaimType,
                         DateTimeOffset.UtcNow.ToUnixTimeSeconds()
@@ -793,10 +1185,25 @@ public sealed class AssetAndPingTests
             await db.SaveChangesAsync();
         }
 
+        public async Task DisableSubnetAsync()
+        {
+            using var scope = Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<WebPassDbContext>();
+            var subnet = await db.Subnets.SingleAsync();
+            subnet.IsEnabled = false;
+            await db.SaveChangesAsync();
+        }
+
         public async Task<List<ServerAsset>> GetAssetsAsync()
         {
             using var scope = Services.CreateScope();
             return await scope.ServiceProvider.GetRequiredService<WebPassDbContext>().ServerAssets.AsNoTracking().ToListAsync();
+        }
+
+        public async Task<int> GetPingResultCountAsync()
+        {
+            using var scope = Services.CreateScope();
+            return await scope.ServiceProvider.GetRequiredService<WebPassDbContext>().PingResults.CountAsync();
         }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder) => builder.ConfigureServices(services =>
@@ -804,9 +1211,48 @@ public sealed class AssetAndPingTests
             services.RemoveAll<DbContextOptions<WebPassDbContext>>();
             services.RemoveAll<WebPassDbContext>();
             services.RemoveAll<IDbContextOptionsConfiguration<WebPassDbContext>>();
-            services.AddDbContext<WebPassDbContext>(options => options.UseInMemoryDatabase(_databaseName));
+            services.AddDbContext<WebPassDbContext>(options =>
+            {
+                options.UseInMemoryDatabase(_databaseName);
+                if (FailPingPersistence)
+                    options.AddInterceptors(new ThrowOnPingSaveInterceptor());
+            });
             services.RemoveAll<IPingTransport>();
-            services.AddSingleton<IPingTransport, SuccessfulPingTransport>();
+            services.AddSingleton<IPingTransport>(
+                new ConfigurablePingTransport(() => PingResponse));
         });
+    }
+
+    private sealed class ConfigurablePingTransport(
+        Func<PingTransportResult> response) : IPingTransport
+    {
+        public Task<PingTransportResult> SendAsync(
+            string targetIp,
+            int timeoutMilliseconds,
+            CancellationToken ct) =>
+            Task.FromResult(response());
+    }
+
+    private sealed class ThrowOnPingSaveInterceptor : SaveChangesInterceptor
+    {
+        public const string InternalFailure =
+            "sensitive persistence detail: PingResults table unavailable";
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (eventData.Context?.ChangeTracker.Entries<PingResult>()
+                .Any(entry => entry.State == EntityState.Added) == true)
+            {
+                throw new InvalidOperationException(InternalFailure);
+            }
+
+            return base.SavingChangesAsync(
+                eventData,
+                result,
+                cancellationToken);
+        }
     }
 }

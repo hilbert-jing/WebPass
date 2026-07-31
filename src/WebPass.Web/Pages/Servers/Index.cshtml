@@ -117,7 +117,7 @@
             AliveStatus.Decommissioned => "warning",
             _ => "warning",
         };
-        <tr>
+        <tr data-asset-id="@item.AssetId">
             <td class="data-value">@item.BusinessIp</td>
             <td>@(item.Location ?? "—")</td>
             <td>
@@ -151,7 +151,25 @@
                         <button type="submit" data-submit-label="正在检测">Ping</button>
                     </form>
                 }
-                @if (Model.CanReveal || Model.CanMarkAlive || Model.CanArchive)
+                @if (Model.PingFeedback is { } pingFeedback &&
+                     pingFeedback.AssetId == id)
+                {
+                    <section class="confirm-panel"
+                             data-ping-feedback
+                             data-tone="@(pingFeedback.IsSuccess ? "success" : "warning")"
+                             role="status">
+                        <p>@pingFeedback.Summary</p>
+                        @if (pingFeedback.IsSuccess && Model.CanMarkAlive)
+                        {
+                            <form method="post" asp-page-handler="MarkAlive">
+                                <input type="hidden" name="id" value="@id" />
+                                <input type="hidden" name="rowVersion" value="@Convert.ToBase64String(item.RowVersion ?? [])" />
+                                <button type="submit" data-submit-label="正在标记">标记为存活</button>
+                            </form>
+                        }
+                    </section>
+                }
+                @if (Model.CanReveal || Model.CanArchive)
                 {
                     <details>
                         <summary>更多操作</summary>
@@ -170,21 +188,33 @@
                                 <button type="button" data-secret-copy>复制密码</button>
                             </section>
                         }
-                        @if (Model.CanMarkAlive)
-                        {
-                            <form method="post" asp-page-handler="MarkAlive">
-                                <input type="hidden" name="id" value="@id" />
-                                <input type="hidden" name="rowVersion" value="@Convert.ToBase64String(item.RowVersion ?? [])" />
-                                <button type="submit" data-submit-label="正在标记">标记存活</button>
-                            </form>
-                        }
                         @if (Model.CanArchive)
                         {
-                            <form method="post" asp-page-handler="Archive">
-                                <input type="hidden" name="id" value="@id" />
-                                <input type="hidden" name="rowVersion" value="@Convert.ToBase64String(item.RowVersion ?? [])" />
-                                <button type="submit" data-submit-label="正在归档">归档</button>
-                            </form>
+                            <details data-archive-confirmation>
+                                <summary>归档服务器</summary>
+                                <section class="confirm-panel"
+                                         data-tone="danger"
+                                         aria-label="确认归档服务器">
+                                    <h3>确认归档服务器</h3>
+                                    <dl>
+                                        <dt>业务 IP</dt>
+                                        <dd class="data-value">@item.BusinessIp</dd>
+                                        <dt>计算机名</dt>
+                                        <dd>@item.ComputerName</dd>
+                                        <dt>系统名称</dt>
+                                        <dd>@item.SystemName</dd>
+                                    </dl>
+                                    <p>
+                                        <strong>归档影响：</strong>
+                                        归档后，该服务器将从默认资产列表中隐藏，历史记录与审计记录仍会保留。
+                                    </p>
+                                    <form method="post" asp-page-handler="Archive">
+                                        <input type="hidden" name="id" value="@id" />
+                                        <input type="hidden" name="rowVersion" value="@Convert.ToBase64String(item.RowVersion ?? [])" />
+                                        <button type="submit" data-submit-label="正在归档">归档服务器</button>
+                                    </form>
+                                </section>
+                            </details>
                         }
                     </details>
                 }
