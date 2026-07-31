@@ -26,14 +26,13 @@
     function closeDrawer(drawer) {
         if (!drawer) return;
 
+        const opener = drawerOpeners.get(drawer);
+        (opener ?? document.getElementById("main-content"))?.focus();
+        opener?.setAttribute("aria-expanded", "false");
         drawer.removeAttribute("data-open");
         if (drawer.hasAttribute("aria-hidden")) {
             drawer.setAttribute("aria-hidden", "true");
         }
-
-        const opener = drawerOpeners.get(drawer);
-        opener?.setAttribute("aria-expanded", "false");
-        opener?.focus();
         drawerOpeners.delete(drawer);
     }
 
@@ -115,9 +114,9 @@
             const isOpen = sidebar.hasAttribute("data-open");
             const shouldMoveFocus = !isOpen &&
                 sidebar.contains(document.activeElement);
+            if (shouldMoveFocus) button.focus();
             sidebar.setAttribute("aria-hidden", isOpen ? "false" : "true");
             button.setAttribute("aria-expanded", isOpen ? "true" : "false");
-            if (shouldMoveFocus) button.focus();
         });
     }
 

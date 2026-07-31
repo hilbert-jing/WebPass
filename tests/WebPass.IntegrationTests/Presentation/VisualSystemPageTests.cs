@@ -723,6 +723,18 @@ public sealed class VisualSystemPageTests
                     this.attributes.delete(name);
                 }
                 setAttribute(name, value) {
+                    if (this === sidebar &&
+                        name === "aria-hidden" &&
+                        String(value) === "true") {
+                        assert.equal(
+                            sidebar.contains(document.activeElement),
+                            false,
+                            "Focus must leave the sidebar before it is hidden");
+                        assert.equal(
+                            document.activeElement,
+                            toggle,
+                            "The visible navigation toggle must own focus before collapse");
+                    }
                     this.attributes.set(name, String(value));
                 }
             }
