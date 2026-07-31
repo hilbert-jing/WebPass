@@ -329,6 +329,53 @@ public sealed class VisualSystemPageTests
     }
 
     [Fact]
+    public async Task Administrator_user_validation_is_csp_safe_and_non_sensitive()
+    {
+        using var factory = new PresentationFactory();
+        factory.InitializeUser(true);
+        using var client = factory.CreateAuthenticatedClient();
+
+        using var getResponse = await client.GetAsync("/admin/users");
+        var getHtml = await getResponse.Content.ReadAsStringAsync();
+        var antiforgeryToken = WebUtility.HtmlDecode(Regex.Match(
+            getHtml,
+            "<input[^>]*name=\"__RequestVerificationToken\"[^>]*value=\"(?<token>[^\"]+)\"",
+            RegexOptions.IgnoreCase).Groups["token"].Value);
+
+        getResponse.EnsureSuccessStatusCode();
+        Assert.False(string.IsNullOrWhiteSpace(antiforgeryToken));
+        Assert.Contains(
+            "default-src 'self'",
+            getResponse.Headers.GetValues("Content-Security-Policy").Single(),
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(" style=", getHtml, StringComparison.OrdinalIgnoreCase);
+
+        var invalidUsername = $"sensitive-{new string('x', 129)}";
+        using var postResponse = await client.PostAsync(
+            "/admin/users?handler=Create",
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["username"] = invalidUsername,
+                ["__RequestVerificationToken"] = antiforgeryToken,
+            }));
+        var invalidHtml = await postResponse.Content.ReadAsStringAsync();
+
+        postResponse.EnsureSuccessStatusCode();
+        Assert.Contains("role=\"alert\"", invalidHtml, StringComparison.Ordinal);
+        Assert.Contains(
+            "请检查表单中标记的错误后重试。",
+            invalidHtml,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(" style=", invalidHtml, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(invalidUsername, invalidHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain("abc123", invalidHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "Username must contain",
+            invalidHtml,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Shared_copy_control_executes_accessible_feedback_without_exfiltration()
     {
         using var factory = new PresentationFactory();

@@ -20,8 +20,6 @@
     </button>
 </header>
 
-<div asp-validation-summary="ModelOnly" class="alert-region"></div>
-
 <table class="data-table">
     <thead>
         <tr>
@@ -148,7 +146,6 @@
     </header>
 
     <form method="post" asp-page-handler="Create">
-        <div asp-validation-summary="All" class="alert-region"></div>
         <div>
             <label for="username">用户名</label>
             <input id="username"
