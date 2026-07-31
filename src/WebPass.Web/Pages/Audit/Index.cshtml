@@ -39,6 +39,7 @@
         @foreach (var entry in Model.Entries)
         {
             var correlationTarget = $"audit-correlation-{entry.Id:N}";
+            var correlationStatus = $"audit-correlation-status-{entry.Id:N}";
             <tr>
                 <td class="data-value">@entry.OccurredAt.ToString("yyyy-MM-dd HH:mm:ss zzz")</td>
                 <td class="data-value">@(entry.ActorUserId?.ToString() ?? "系统")</td>
@@ -62,9 +63,15 @@
                         <button type="button"
                                 data-copy
                                 data-copy-target="#@correlationTarget"
-                                aria-label="复制关联编号 @entry.CorrelationId">
+                                data-copy-status-target="#@correlationStatus"
+                                aria-describedby="@correlationStatus"
+                                aria-label="复制关联编号">
                             复制
                         </button>
+                        <span id="@correlationStatus"
+                              role="status"
+                              aria-live="polite"
+                              aria-atomic="true"></span>
                     }
                 </td>
             </tr>

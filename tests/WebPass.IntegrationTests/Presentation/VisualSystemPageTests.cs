@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Net;
+using System.Text;
 using System.Text.RegularExpressions;
 using WebPass.Web.Application.Authorization;
 using WebPass.Web.Domain.Entities;
@@ -253,6 +255,18 @@ public sealed class VisualSystemPageTests
         Assert.DoesNotContain("筛选审计", auditHtml, StringComparison.Ordinal);
         Assert.Contains("data-copy", auditHtml, StringComparison.Ordinal);
         Assert.Contains("data-copy-target", auditHtml, StringComparison.Ordinal);
+        Assert.Contains("data-copy-status-target", auditHtml, StringComparison.Ordinal);
+        Assert.Contains("aria-describedby=", auditHtml, StringComparison.Ordinal);
+        Assert.Contains("role=\"status\"", auditHtml, StringComparison.Ordinal);
+        Assert.Contains("aria-live=\"polite\"", auditHtml, StringComparison.Ordinal);
+        Assert.Contains(
+            "aria-label=\"复制关联编号\"",
+            auditHtml,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "aria-label=\"复制关联编号 governance-42\"",
+            auditHtml,
+            StringComparison.Ordinal);
 
         Assert.Contains("用户与权限", usersHtml, StringComparison.Ordinal);
         Assert.Contains("创建普通用户", usersHtml, StringComparison.Ordinal);
@@ -288,23 +302,202 @@ public sealed class VisualSystemPageTests
     }
 
     [Fact]
-    public async Task Shared_copy_control_reads_text_content_and_reports_safe_feedback()
+    public async Task Shared_copy_control_executes_accessible_feedback_without_exfiltration()
     {
         using var factory = new PresentationFactory();
         using var client = factory.CreateClient();
 
         var script = await client.GetStringAsync("/js/site.js");
 
-        Assert.Contains("button.dataset.copyTarget", script, StringComparison.Ordinal);
-        Assert.Contains("target?.textContent", script, StringComparison.Ordinal);
-        Assert.Contains("navigator.clipboard.writeText", script, StringComparison.Ordinal);
-        Assert.Contains("\"已复制\"", script, StringComparison.Ordinal);
-        Assert.Contains(
-            "\"复制失败，请手动选择\"",
-            script,
-            StringComparison.Ordinal);
-        Assert.Contains("}, 1800);", script, StringComparison.Ordinal);
-        Assert.DoesNotContain("console.", script, StringComparison.Ordinal);
+        var harness =
+            """
+            import assert from "node:assert/strict";
+            import vm from "node:vm";
+
+            const source = Buffer
+                .from(process.env.WEBPASS_SITE_SCRIPT_BASE64, "base64")
+                .toString("utf8");
+            const copiedText = "governance-copy-42";
+
+            async function exercise({ targetPresent, clipboardFails }) {
+                let clickHandler;
+                const scheduled = [];
+                const clipboardWrites = [];
+                const externalCalls = [];
+
+                class Element {
+                    closest(selector) {
+                        return selector === "[data-copy]" ? this : null;
+                    }
+                }
+
+                const button = new Element();
+                button.dataset = {
+                    copyTarget: "#copy-value",
+                    copyStatusTarget: "#copy-status",
+                };
+                button.textContent = "复制";
+                const target = targetPresent
+                    ? { textContent: `  ${copiedText}  ` }
+                    : null;
+                const status = { textContent: "" };
+                const storage = {
+                    getItem(key) {
+                        externalCalls.push(["storage.getItem", key]);
+                        return null;
+                    },
+                    setItem(key, value) {
+                        externalCalls.push(["storage.setItem", key, value]);
+                    },
+                };
+                const trackedConsole = Object.fromEntries(
+                    ["debug", "error", "info", "log", "warn"].map(method => [
+                        method,
+                        (...args) => externalCalls.push([`console.${method}`, ...args]),
+                    ]));
+                const document = {
+                    addEventListener(type, handler) {
+                        if (type === "click") clickHandler = handler;
+                    },
+                    getElementById() {
+                        return null;
+                    },
+                    querySelector(selector) {
+                        if (selector === "#copy-value") return target;
+                        if (selector === "#copy-status") return status;
+                        return null;
+                    },
+                    querySelectorAll() {
+                        return [];
+                    },
+                };
+                const sandbox = {
+                    console: trackedConsole,
+                    DataTransfer: class {},
+                    document,
+                    Element,
+                    fetch: (...args) => externalCalls.push(["fetch", ...args]),
+                    HTMLButtonElement: class extends Element {},
+                    HTMLInputElement: class extends Element {},
+                    HTMLSelectElement: class extends Element {},
+                    localStorage: storage,
+                    navigator: {
+                        clipboard: {
+                            writeText(value) {
+                                clipboardWrites.push(value);
+                                return clipboardFails
+                                    ? Promise.reject(new Error("denied"))
+                                    : Promise.resolve();
+                            },
+                        },
+                        sendBeacon: (...args) => externalCalls.push(["sendBeacon", ...args]),
+                    },
+                    sessionStorage: storage,
+                    WebSocket: class {
+                        constructor(...args) {
+                            externalCalls.push(["WebSocket", ...args]);
+                        }
+                    },
+                    window: {
+                        setTimeout(callback, delay) {
+                            scheduled.push({ callback, delay });
+                        },
+                    },
+                    XMLHttpRequest: class {
+                        constructor() {
+                            externalCalls.push(["XMLHttpRequest"]);
+                        }
+                    },
+                };
+
+                vm.createContext(sandbox);
+                vm.runInContext(source, sandbox);
+                assert.equal(typeof clickHandler, "function");
+
+                clickHandler({ target: button });
+                await Promise.resolve();
+                await Promise.resolve();
+
+                return {
+                    button,
+                    clipboardWrites,
+                    externalCalls,
+                    scheduled,
+                    status,
+                };
+            }
+
+            const success = await exercise({
+                targetPresent: true,
+                clipboardFails: false,
+            });
+            assert.deepEqual(success.clipboardWrites, [copiedText]);
+            assert.equal(success.status.textContent, "已复制");
+            assert.equal(success.button.textContent, "复制");
+            assert.equal(success.scheduled.length, 1);
+            assert.equal(success.scheduled[0].delay, 1800);
+            assert.ok(!success.status.textContent.includes(copiedText));
+            success.scheduled[0].callback();
+            assert.equal(success.status.textContent, "");
+            assert.deepEqual(success.externalCalls, []);
+
+            const failure = await exercise({
+                targetPresent: true,
+                clipboardFails: true,
+            });
+            assert.deepEqual(failure.clipboardWrites, [copiedText]);
+            assert.equal(failure.status.textContent, "复制失败，请手动选择");
+            assert.equal(failure.button.textContent, "复制");
+            assert.equal(failure.scheduled.length, 1);
+            assert.equal(failure.scheduled[0].delay, 1800);
+            assert.ok(!failure.status.textContent.includes(copiedText));
+            failure.scheduled[0].callback();
+            assert.equal(failure.status.textContent, "");
+            assert.deepEqual(failure.externalCalls, []);
+
+            const missingTarget = await exercise({
+                targetPresent: false,
+                clipboardFails: false,
+            });
+            assert.deepEqual(missingTarget.clipboardWrites, []);
+            assert.equal(
+                missingTarget.status.textContent,
+                "复制失败，请手动选择");
+            assert.equal(missingTarget.button.textContent, "复制");
+            assert.equal(missingTarget.scheduled.length, 1);
+            assert.equal(missingTarget.scheduled[0].delay, 1800);
+            missingTarget.scheduled[0].callback();
+            assert.equal(missingTarget.status.textContent, "");
+            assert.deepEqual(missingTarget.externalCalls, []);
+
+            process.stdout.write("copy-behavior-ok");
+            """;
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo("node")
+            {
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+            },
+        };
+        process.StartInfo.ArgumentList.Add("--input-type=module");
+        process.StartInfo.ArgumentList.Add("--eval");
+        process.StartInfo.ArgumentList.Add(harness);
+        process.StartInfo.Environment["WEBPASS_SITE_SCRIPT_BASE64"] =
+            Convert.ToBase64String(Encoding.UTF8.GetBytes(script));
+
+        Assert.True(process.Start());
+        var standardOutput = process.StandardOutput.ReadToEndAsync();
+        var standardError = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        var output = await standardOutput;
+        var error = await standardError;
+
+        Assert.True(
+            process.ExitCode == 0,
+            $"Node copy behavior test failed:{Environment.NewLine}{error}");
+        Assert.Equal("copy-behavior-ok", output);
     }
 
     [Fact]

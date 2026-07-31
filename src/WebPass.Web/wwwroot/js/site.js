@@ -50,30 +50,32 @@
 
     async function copyText(button) {
         const selector = button.dataset.copyTarget;
+        const statusSelector = button.dataset.copyStatusTarget;
         const target = selector ? document.querySelector(selector) : null;
+        const status = statusSelector
+            ? document.querySelector(statusSelector)
+            : null;
         const text = target?.textContent?.trim() ?? "";
-        const originalLabel = button.textContent;
 
-        const restoreLabel = () => {
+        const showFeedback = message => {
+            if (!status) return;
+            status.textContent = message;
             window.setTimeout(() => {
-                button.textContent = originalLabel;
+                status.textContent = "";
             }, 1800);
         };
 
         if (!text || !navigator.clipboard?.writeText) {
-            button.textContent = "复制失败，请手动选择";
-            restoreLabel();
+            showFeedback("复制失败，请手动选择");
             return;
         }
 
         try {
             await navigator.clipboard.writeText(text);
-            button.textContent = "已复制";
+            showFeedback("已复制");
         } catch {
-            button.textContent = "复制失败，请手动选择";
+            showFeedback("复制失败，请手动选择");
         }
-
-        restoreLabel();
     }
 
     document.querySelectorAll("[data-nav-toggle]").forEach(button => {
