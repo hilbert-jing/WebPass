@@ -1,4 +1,6 @@
 (() => {
+    document.body?.setAttribute("data-js-enabled", "");
+
     const focusable = "a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex='-1'])";
     const drawerOpeners = new WeakMap();
     const mobileNavigation = window.matchMedia?.("(max-width: 767px)") ?? null;
@@ -25,6 +27,12 @@
             document.getElementById("main-content"))?.focus();
     }
 
+    function focusDrawer(drawer) {
+        const initialFocus = drawer.querySelector("[data-drawer-initial-focus]") ??
+            drawer.querySelector(focusable);
+        initialFocus?.focus();
+    }
+
     function openDrawer(id, opener) {
         const drawer = getDrawer(id);
         if (!drawer) return;
@@ -35,9 +43,7 @@
         }
         drawerOpeners.set(drawer, opener);
         opener?.setAttribute("aria-expanded", "true");
-        const initialFocus = drawer.querySelector("[data-drawer-initial-focus]") ??
-            drawer.querySelector(focusable);
-        initialFocus?.focus();
+        focusDrawer(drawer);
     }
 
     function closeDrawer(drawer) {
@@ -67,10 +73,11 @@
 
         if (!isOpen) moveFocusOutsideBeforeHide(drawer, opener);
         drawer.setAttribute("aria-hidden", isOpen ? "false" : "true");
-        if (!opener) return;
-
-        opener.setAttribute("aria-expanded", isOpen ? "true" : "false");
-        if (isOpen) drawerOpeners.set(drawer, opener);
+        if (opener) {
+            opener.setAttribute("aria-expanded", isOpen ? "true" : "false");
+            if (isOpen) drawerOpeners.set(drawer, opener);
+        }
+        if (isOpen) focusDrawer(drawer);
     });
 
     async function copyText(button) {
@@ -158,6 +165,16 @@
 
     document.addEventListener("keydown", event => {
         if (event.key !== "Escape") return;
+
+        const target = event.target instanceof Element ? event.target : null;
+        const details = target?.closest("details[open]");
+        if (details) {
+            event.preventDefault();
+            details.querySelector("summary")?.focus();
+            details.removeAttribute("open");
+            return;
+        }
+
         const drawers = document.querySelectorAll("[data-drawer][data-open]");
         closeDrawer(drawers[drawers.length - 1]);
     });

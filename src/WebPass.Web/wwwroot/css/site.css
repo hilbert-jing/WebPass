@@ -123,6 +123,14 @@ input[type="submit"]:disabled,
     opacity: .64;
 }
 
+[data-js-only] {
+    display: none;
+}
+
+body[data-js-enabled] [data-js-only] {
+    display: inline-flex;
+}
+
 input:not([type="checkbox"]):not([type="radio"]):not([type="submit"]),
 select,
 textarea {
@@ -520,6 +528,16 @@ table tbody tr:last-child td {
 }
 
 .drawer {
+    position: static;
+    width: 100%;
+    margin-top: 20px;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-surface);
+    background: var(--color-canvas);
+    padding: 20px;
+}
+
+body[data-js-enabled] .drawer {
     position: fixed;
     z-index: 100;
     inset: 0 0 0 auto;
@@ -527,7 +545,9 @@ table tbody tr:last-child td {
     max-height: 100dvh;
     overflow-y: auto;
     overscroll-behavior: contain;
-    border-left: 1px solid var(--color-line);
+    margin-top: 0;
+    border-width: 0 0 0 1px;
+    border-radius: 0;
     background: var(--color-canvas);
     box-shadow: var(--shadow-panel);
     padding: 20px;
@@ -536,7 +556,7 @@ table tbody tr:last-child td {
     visibility: hidden;
 }
 
-.drawer[data-open] {
+body[data-js-enabled] .drawer[data-open] {
     transform: translateX(0);
     visibility: visible;
 }

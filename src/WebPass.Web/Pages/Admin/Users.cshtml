@@ -13,6 +13,7 @@
         <p>创建普通用户，控制账号状态，并按职责分配最小权限。</p>
     </div>
     <button type="button"
+            data-js-only
             data-drawer-open="create-user"
             aria-controls="create-user"
             aria-expanded="@openCreation.ToString().ToLowerInvariant()">
@@ -121,17 +122,6 @@
     </tbody>
 </table>
 
-<noscript>
-    <style>
-        #create-user.drawer {
-            position: static;
-            width: 100%;
-            margin-top: 20px;
-            transform: none;
-            visibility: visible;
-        }
-    </style>
-</noscript>
 <aside id="create-user"
        class="drawer"
        data-drawer="create-user"
@@ -142,7 +132,7 @@
             <h2 id="create-user-heading">创建普通用户</h2>
             <p>新账号使用系统预设初始密码创建，之后可在列表中分配权限。</p>
         </div>
-        <button type="button" data-drawer-close aria-label="关闭创建用户面板">关闭</button>
+        <button type="button" data-js-only data-drawer-close aria-label="关闭创建用户面板">关闭</button>
     </header>
 
     <form method="post" asp-page-handler="Create">

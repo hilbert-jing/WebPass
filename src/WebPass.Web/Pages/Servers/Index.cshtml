@@ -18,6 +18,7 @@
     @if (Model.CanCreate)
     {
         <button type="button"
+                data-js-only
                 data-drawer-open="register-server"
                 aria-controls="register-server"
                 aria-expanded="@openRegistration.ToString().ToLowerInvariant()">
@@ -236,17 +237,6 @@
 
 @if (Model.CanCreate)
 {
-    <noscript>
-        <style>
-            #register-server.drawer {
-                position: static;
-                width: 100%;
-                margin-top: 20px;
-                transform: none;
-                visibility: visible;
-            }
-        </style>
-    </noscript>
     <aside id="register-server"
            class="drawer"
            data-drawer="register-server"
@@ -257,7 +247,7 @@
                 <h2 id="register-server-title">登记服务器</h2>
                 <p>登记业务 IP 与系统归属，密码可留空。</p>
             </div>
-            <button type="button" data-drawer-close aria-label="关闭登记面板">关闭</button>
+            <button type="button" data-js-only data-drawer-close aria-label="关闭登记面板">关闭</button>
         </header>
         <form method="post" asp-page-handler="Create">
             <div>

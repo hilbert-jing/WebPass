@@ -12,6 +12,7 @@
         <p>维护服务器可用的网络范围、位置和启用状态，并在保存前核对 CIDR 地址范围。</p>
     </div>
     <button type="button"
+            data-js-only
             data-drawer-open="create-subnet"
             aria-controls="create-subnet"
             aria-expanded="@openCreation.ToString().ToLowerInvariant()">
@@ -111,17 +112,6 @@
     </tbody>
 </table>
 
-<noscript>
-    <style>
-        #create-subnet.drawer {
-            position: static;
-            width: 100%;
-            margin-top: 20px;
-            transform: none;
-            visibility: visible;
-        }
-    </style>
-</noscript>
 <aside id="create-subnet"
        class="drawer"
        data-drawer="create-subnet"
@@ -132,7 +122,7 @@
             <h2 id="create-subnet-title">添加网段</h2>
             <p>填写 CIDR 后可先预览网络边界，再保存网段。</p>
         </div>
-        <button type="button" data-drawer-close aria-label="关闭添加网段面板">关闭</button>
+        <button type="button" data-js-only data-drawer-close aria-label="关闭添加网段面板">关闭</button>
     </header>
 
     <form method="post"
@@ -163,6 +153,7 @@
         </div>
 
         <button type="button"
+                data-js-only
                 data-subnet-preview
                 aria-controls="subnet-preview-result">
             预览 CIDR

@@ -125,7 +125,7 @@ public sealed class VisualSystemPageTests
     }
 
     [Fact]
-    public async Task Server_drawer_uses_progressive_enhancement_for_accessibility_and_preopened_focus()
+    public async Task Server_drawer_response_preserves_preopened_accessibility_state()
     {
         using var factory = new PresentationFactory();
         factory.InitializeUser(
@@ -136,7 +136,6 @@ public sealed class VisualSystemPageTests
 
         var html = await client.GetStringAsync(
             "/servers?Input.BusinessIp=10.0.0.1");
-        var script = await client.GetStringAsync("/js/site.js");
         var drawerTag = Regex.Match(
             html,
             "<aside[^>]*data-drawer=\"register-server\"[^>]*>",
@@ -145,19 +144,74 @@ public sealed class VisualSystemPageTests
         Assert.Contains("data-open", drawerTag, StringComparison.Ordinal);
         Assert.DoesNotContain("aria-hidden", drawerTag, StringComparison.Ordinal);
         Assert.Contains("aria-expanded=\"true\"", html, StringComparison.Ordinal);
-        Assert.Contains("<noscript>", html, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("/servers", "register-server", "Input.BusinessIp")]
+    [InlineData("/subnets", "create-subnet", "Input.Name")]
+    [InlineData("/admin/users", "create-user", "username")]
+    public async Task Create_forms_render_a_no_javascript_submission_baseline(
+        string path,
+        string drawerId,
+        string fieldName)
+    {
+        using var factory = new PresentationFactory();
+        factory.InitializeUser(true);
+        using var client = factory.CreateAuthenticatedClient();
+
+        var html = await client.GetStringAsync(path);
+        var openerTag = Regex.Match(
+            html,
+            $"<button[^>]*data-drawer-open=\"{Regex.Escape(drawerId)}\"[^>]*>",
+            RegexOptions.Singleline).Value;
+        var drawer = Regex.Match(
+            html,
+            $"<aside[^>]*id=\"{Regex.Escape(drawerId)}\"[^>]*>.*?</aside>",
+            RegexOptions.Singleline).Value;
+        var drawerTag = Regex.Match(
+            drawer,
+            "<aside[^>]*>",
+            RegexOptions.Singleline).Value;
+        var closeTag = Regex.Match(
+            drawer,
+            "<button[^>]*data-drawer-close[^>]*>",
+            RegexOptions.Singleline).Value;
+
+        Assert.DoesNotMatch("<noscript>\\s*<style", html);
+        Assert.DoesNotContain("hidden", drawerTag, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("data-js-only", openerTag, StringComparison.Ordinal);
+        Assert.Contains("data-js-only", closeTag, StringComparison.Ordinal);
+        Assert.Contains($"name=\"{fieldName}\"", drawer, StringComparison.Ordinal);
+        Assert.Matches(
+            "<form[^>]*method=\"post\"[^>]*action=\"[^\"]*handler=Create[^\"]*\"",
+            drawer);
         Assert.Contains(
-            "document.querySelectorAll(\"[data-drawer]\")",
-            script,
+            "name=\"__RequestVerificationToken\"",
+            drawer,
             StringComparison.Ordinal);
-        Assert.Contains(
-            "drawer.setAttribute(\"aria-hidden\", isOpen ? \"false\" : \"true\");",
-            script,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "drawerOpeners.set(drawer, opener);",
-            script,
-            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Stylesheet_keeps_drawers_visible_until_external_script_enhances_page()
+    {
+        using var factory = new PresentationFactory();
+        using var client = factory.CreateClient();
+
+        var css = await client.GetStringAsync("/css/site.css");
+        var baseline = Regex.Match(
+            css,
+            "(?ms)^\\.drawer\\s*\\{(?<rules>.*?)^\\}").Groups["rules"].Value;
+        var enhanced = Regex.Match(
+            css,
+            "(?ms)^body\\[data-js-enabled\\] \\.drawer\\s*\\{(?<rules>.*?)^\\}")
+            .Groups["rules"].Value;
+
+        Assert.Contains("position: static", baseline, StringComparison.Ordinal);
+        Assert.DoesNotContain("visibility: hidden", baseline, StringComparison.Ordinal);
+        Assert.DoesNotContain("translateX", baseline, StringComparison.Ordinal);
+        Assert.Contains("position: fixed", enhanced, StringComparison.Ordinal);
+        Assert.Contains("visibility: hidden", enhanced, StringComparison.Ordinal);
+        Assert.Contains("[data-js-only]", css, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -760,6 +814,240 @@ public sealed class VisualSystemPageTests
             "max-height: 100dvh",
             css,
             StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("enhancement-marker")]
+    [InlineData("preopened-focus")]
+    [InlineData("details-escape")]
+    public async Task Site_script_executes_progressive_drawer_and_menu_behaviors(
+        string scenario)
+    {
+        using var factory = new PresentationFactory();
+        using var client = factory.CreateClient();
+
+        var script = await client.GetStringAsync("/js/site.js");
+        var harness =
+            """
+            import assert from "node:assert/strict";
+            import vm from "node:vm";
+
+            const source = Buffer
+                .from(process.env.WEBPASS_SITE_SCRIPT_BASE64, "base64")
+                .toString("utf8");
+            const scenario = process.env.WEBPASS_SITE_SCENARIO;
+            const documentListeners = new Map();
+            const elementsById = new Map();
+            const drawers = [];
+            const openers = [];
+            let drawer = null;
+
+            class Element {
+                constructor(tagName = "div", id = "") {
+                    this.tagName = tagName.toUpperCase();
+                    this.id = id;
+                    this.dataset = {};
+                    this.attributes = new Map();
+                    this.children = [];
+                    this.listeners = new Map();
+                    this.parentElement = null;
+                    this.initialFocus = null;
+                    this.primaryNavigationLink = null;
+                    if (id) elementsById.set(id, this);
+                }
+                add(child) {
+                    child.parentElement = this;
+                    this.children.push(child);
+                    return child;
+                }
+                addEventListener(type, handler) {
+                    this.listeners.set(type, handler);
+                }
+                closest(selector) {
+                    for (let current = this; current; current = current.parentElement) {
+                        if (selector === "details[open]" &&
+                            current.tagName === "DETAILS" &&
+                            current.hasAttribute("open")) return current;
+                        if (selector === "[data-drawer]" &&
+                            current.hasAttribute("data-drawer")) return current;
+                    }
+                    return null;
+                }
+                contains(element) {
+                    return this === element ||
+                        this.children.some(child => child.contains(element));
+                }
+                focus() {
+                    document.activeElement = this;
+                }
+                getAttribute(name) {
+                    return this.attributes.get(name) ?? null;
+                }
+                hasAttribute(name) {
+                    return this.attributes.has(name);
+                }
+                querySelector(selector) {
+                    if (selector === "[data-drawer-initial-focus]") {
+                        return this.initialFocus;
+                    }
+                    if (selector === ".primary-nav a") {
+                        return this.primaryNavigationLink;
+                    }
+                    if (selector === "summary") {
+                        return this.children.find(child =>
+                            child.tagName === "SUMMARY") ?? null;
+                    }
+                    return null;
+                }
+                removeAttribute(name) {
+                    this.attributes.delete(name);
+                }
+                setAttribute(name, value) {
+                    if (scenario === "enhancement-marker" &&
+                        this === drawer &&
+                        name === "aria-hidden") {
+                        assert.equal(
+                            body.hasAttribute("data-js-enabled"),
+                            true,
+                            "The external script must mark enhancement before hiding a drawer");
+                    }
+                    this.attributes.set(name, String(value));
+                }
+            }
+
+            const body = new Element("body");
+            const document = {
+                activeElement: null,
+                body,
+                addEventListener(type, handler) {
+                    documentListeners.set(type, handler);
+                },
+                getElementById(id) {
+                    return elementsById.get(id) ?? null;
+                },
+                querySelector() {
+                    return null;
+                },
+                querySelectorAll(selector) {
+                    if (selector === "[data-drawer]") return drawers;
+                    if (selector === "[data-drawer-open], [data-nav-toggle]") {
+                        return openers;
+                    }
+                    if (selector === "[data-nav-toggle]") return [];
+                    if (selector === "[data-drawer][data-open]") {
+                        return drawers.filter(item => item.hasAttribute("data-open"));
+                    }
+                    return [];
+                },
+            };
+
+            if (scenario === "enhancement-marker" ||
+                scenario === "preopened-focus") {
+                drawer = body.add(new Element("aside", "register-server"));
+                drawer.setAttribute("data-drawer", "register-server");
+                drawers.push(drawer);
+                const opener = body.add(new Element("button"));
+                opener.dataset.drawerOpen = drawer.id;
+                opener.setAttribute("data-drawer-open", drawer.id);
+                opener.setAttribute("aria-controls", drawer.id);
+                openers.push(opener);
+
+                if (scenario === "preopened-focus") {
+                    drawer.setAttribute("data-open", "");
+                    drawer.initialFocus = drawer.add(new Element("input"));
+                }
+            }
+
+            let details = null;
+            let summary = null;
+            let action = null;
+            if (scenario === "details-escape") {
+                details = body.add(new Element("details"));
+                details.setAttribute("open", "");
+                summary = details.add(new Element("summary"));
+                action = details.add(new Element("button"));
+            }
+
+            const sandbox = {
+                console,
+                DataTransfer: class {},
+                document,
+                Element,
+                HTMLButtonElement: class extends Element {},
+                HTMLInputElement: class extends Element {},
+                HTMLSelectElement: class extends Element {},
+                navigator: {},
+                window: {
+                    matchMedia() {
+                        return {
+                            matches: false,
+                            addEventListener() {},
+                        };
+                    },
+                    setTimeout() {},
+                },
+            };
+
+            vm.createContext(sandbox);
+            vm.runInContext(source, sandbox);
+
+            if (scenario === "enhancement-marker") {
+                assert.equal(body.hasAttribute("data-js-enabled"), true);
+                assert.equal(drawer.getAttribute("aria-hidden"), "true");
+            }
+
+            if (scenario === "preopened-focus") {
+                assert.equal(drawer.getAttribute("aria-hidden"), "false");
+                assert.equal(
+                    document.activeElement,
+                    drawer.initialFocus,
+                    "A preopened drawer must focus its first actionable field");
+            }
+
+            if (scenario === "details-escape") {
+                action.focus();
+                let prevented = false;
+                documentListeners.get("keydown")({
+                    key: "Escape",
+                    target: action,
+                    preventDefault() {
+                        prevented = true;
+                    },
+                });
+                assert.equal(details.hasAttribute("open"), false);
+                assert.equal(document.activeElement, summary);
+                assert.equal(prevented, true);
+            }
+
+            process.stdout.write(`${scenario}-ok`);
+            """;
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo("node")
+            {
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+            },
+        };
+        process.StartInfo.ArgumentList.Add("--input-type=module");
+        process.StartInfo.ArgumentList.Add("--eval");
+        process.StartInfo.ArgumentList.Add(harness);
+        process.StartInfo.Environment["WEBPASS_SITE_SCRIPT_BASE64"] =
+            Convert.ToBase64String(Encoding.UTF8.GetBytes(script));
+        process.StartInfo.Environment["WEBPASS_SITE_SCENARIO"] = scenario;
+
+        Assert.True(process.Start());
+        var standardOutput = process.StandardOutput.ReadToEndAsync();
+        var standardError = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        var output = await standardOutput;
+        var error = await standardError;
+
+        Assert.True(
+            process.ExitCode == 0,
+            $"Node {scenario} behavior test failed:{Environment.NewLine}{error}");
+        Assert.Equal($"{scenario}-ok", output);
     }
 
     [Fact]
