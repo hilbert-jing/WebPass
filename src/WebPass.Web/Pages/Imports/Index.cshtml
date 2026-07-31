@@ -24,11 +24,10 @@
       class="form-section">
     <label asp-for="Upload"
            class="upload-zone"
-           data-upload-zone
-           tabindex="0">
+           data-upload-zone>
         <strong>选择或拖入服务器清单</strong>
         <span>CSV 或 XLSX · 最大 10 MB，最多 5,000 行</span>
-        <span data-upload-name>尚未选择文件</span>
+        <span data-upload-name aria-live="polite">尚未选择文件</span>
         <input asp-for="Upload"
                type="file"
                accept=".csv,.xlsx"
@@ -81,8 +80,8 @@
                     {
                         <tr>
                             <td>@error.RowNumber</td>
-                            <td>@error.Field</td>
-                            <td>@error.Message</td>
+                            <td>@WebPass.Web.Pages.Imports.IndexModel.ImportErrorField(error.Field)</td>
+                            <td>@WebPass.Web.Pages.Imports.IndexModel.ImportErrorMessage(error.Message)</td>
                         </tr>
                     }
                     </tbody>

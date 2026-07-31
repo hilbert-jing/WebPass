@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Security.Claims;
+using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -12,6 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using WebPass.Web.Application.Authorization;
+using WebPass.Web.Application.Importing;
 using WebPass.Web.Application.Secrets;
 using WebPass.Web.Data;
 using WebPass.Web.Domain.Entities;
@@ -37,6 +40,16 @@ public sealed class ImportPageTests
         Assert.Contains("data-upload-zone", html, StringComparison.Ordinal);
         Assert.Contains("data-upload-input", html, StringComparison.Ordinal);
         Assert.Contains("accept=\".csv,.xlsx\"", html, StringComparison.Ordinal);
+        var uploadZoneTag = Regex.Match(
+            html,
+            "<label[^>]*data-upload-zone[^>]*>",
+            RegexOptions.Singleline).Value;
+        Assert.DoesNotContain("tabindex=", uploadZoneTag, StringComparison.Ordinal);
+        Assert.DoesNotContain("role=", uploadZoneTag, StringComparison.Ordinal);
+        Assert.Contains(
+            "data-upload-name aria-live=\"polite\"",
+            html,
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -99,13 +112,23 @@ public sealed class ImportPageTests
         using var response = await client.PostAsync(
             "/imports?handler=Preview",
             form);
-        var responseHtml = await response.Content.ReadAsStringAsync();
+        var responseHtml = WebUtility.HtmlDecode(
+            await response.Content.ReadAsStringAsync());
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Contains("class=\"import-errors", responseHtml, StringComparison.Ordinal);
         Assert.Contains("<th>行号</th>", responseHtml, StringComparison.Ordinal);
         Assert.Contains("<th>字段</th>", responseHtml, StringComparison.Ordinal);
         Assert.Contains("<th>原因</th>", responseHtml, StringComparison.Ordinal);
+        Assert.Contains("<td>业务 IP</td>", responseHtml, StringComparison.Ordinal);
+        Assert.Contains(
+            "必须是规范的 IPv4 地址。",
+            responseHtml,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "A canonical IPv4 address is required.",
+            responseHtml,
+            StringComparison.Ordinal);
         Assert.Contains("必须修复文件后重新上传", responseHtml, StringComparison.Ordinal);
         Assert.DoesNotContain("提交导入", responseHtml, StringComparison.Ordinal);
         Assert.DoesNotContain(rawPassword, responseHtml, StringComparison.Ordinal);
@@ -130,6 +153,144 @@ public sealed class ImportPageTests
 
         Assert.Contains(
             "请选择 CSV 或 XLSX 文件。",
+            responseHtml,
+            StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("servers.txt", "text/csv")]
+    [InlineData("servers.csv", "application/json")]
+    public async Task Unsupported_extension_or_media_type_is_rejected_by_preview_handler(
+        string fileName,
+        string contentType)
+    {
+        using var factory = new ImportPageFactory();
+        factory.InitializeData();
+        using var client = factory.CreateAuthenticatedClient();
+        var html = await client.GetStringAsync("/imports");
+        using var form = new MultipartFormDataContent();
+        form.Add(
+            new StringContent(AntiforgeryToken(html)),
+            "__RequestVerificationToken");
+        var file = new StringContent(
+            "BusinessIp,Location,AliveStatus,ComputerName,SystemName\r\n");
+        file.Headers.ContentType = new MediaTypeHeaderValue(contentType);
+        form.Add(file, "Upload", fileName);
+
+        using var response = await client.PostAsync(
+            "/imports?handler=Preview",
+            form);
+        var responseHtml = WebUtility.HtmlDecode(
+            await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains(
+            "仅支持 CSV 和 XLSX 服务器清单文件。",
+            responseHtml,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task File_over_ten_megabytes_is_rejected_with_safe_chinese_error()
+    {
+        using var factory = new ImportPageFactory();
+        factory.InitializeData();
+        using var client = factory.CreateAuthenticatedClient();
+        var html = await client.GetStringAsync("/imports");
+        using var form = new MultipartFormDataContent();
+        form.Add(
+            new StringContent(AntiforgeryToken(html)),
+            "__RequestVerificationToken");
+        var file = new ByteArrayContent(new byte[(10 * 1024 * 1024) + 1]);
+        file.Headers.ContentType = new MediaTypeHeaderValue("text/csv");
+        form.Add(file, "Upload", "servers.csv");
+
+        using var response = await client.PostAsync(
+            "/imports?handler=Preview",
+            form);
+        var responseHtml = WebUtility.HtmlDecode(
+            await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains(
+            "导入文件不能超过 10 MB。",
+            responseHtml,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "The import file exceeds",
+            responseHtml,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task File_over_five_thousand_rows_is_blocked_with_safe_chinese_error()
+    {
+        using var factory = new ImportPageFactory();
+        factory.InitializeData();
+        using var client = factory.CreateAuthenticatedClient();
+        var html = await client.GetStringAsync("/imports");
+        var csv = new StringBuilder(
+            "BusinessIp,Location,AliveStatus,ComputerName,SystemName,OperatingSystemVersion,DatabaseVersion,Notes,Password\r\n");
+        for (var row = 0; row < 5_001; row++)
+        {
+            csv.Append("10.0.0.10,DC,Unknown,server-10,ERP,,,,\r\n");
+        }
+        using var form = new MultipartFormDataContent();
+        form.Add(
+            new StringContent(AntiforgeryToken(html)),
+            "__RequestVerificationToken");
+        form.Add(new StringContent(csv.ToString()), "Upload", "servers.csv");
+
+        using var response = await client.PostAsync(
+            "/imports?handler=Preview",
+            form);
+        var responseHtml = WebUtility.HtmlDecode(
+            await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("<td>文件</td>", responseHtml, StringComparison.Ordinal);
+        Assert.Contains(
+            "导入文件最多包含 5,000 行。",
+            responseHtml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "必须修复文件后重新上传",
+            responseHtml,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("提交导入", responseHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "The import exceeds",
+            responseHtml,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Unknown_import_error_uses_fixed_fallback_without_internal_text()
+    {
+        using var factory = new ImportPageFactory(useUnknownErrorPreview: true);
+        factory.InitializeData();
+        using var client = factory.CreateAuthenticatedClient();
+        var html = await client.GetStringAsync("/imports");
+        using var form = new MultipartFormDataContent();
+        form.Add(
+            new StringContent(AntiforgeryToken(html)),
+            "__RequestVerificationToken");
+        form.Add(new StringContent("valid-enough"), "Upload", "servers.csv");
+
+        using var response = await client.PostAsync(
+            "/imports?handler=Preview",
+            form);
+        var responseHtml = WebUtility.HtmlDecode(
+            await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("<td>未识别字段</td>", responseHtml, StringComparison.Ordinal);
+        Assert.Contains(
+            "无法导入此行，请检查文件内容。",
+            responseHtml,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            UnknownErrorImportService.InternalMessage,
             responseHtml,
             StringComparison.Ordinal);
     }
@@ -191,6 +352,10 @@ public sealed class ImportPageTests
     {
         private readonly string _databaseName = Guid.NewGuid().ToString("N");
         private readonly Guid _userId = Guid.NewGuid();
+        private readonly bool _useUnknownErrorPreview;
+
+        public ImportPageFactory(bool useUnknownErrorPreview = false) =>
+            _useUnknownErrorPreview = useUnknownErrorPreview;
 
         public void InitializeData()
         {
@@ -258,7 +423,39 @@ public sealed class ImportPageTests
                     options => options.UseInMemoryDatabase(_databaseName));
                 services.RemoveAll<ISecretCipher>();
                 services.AddSingleton<ISecretCipher, StubSecretCipher>();
+                if (_useUnknownErrorPreview)
+                {
+                    services.RemoveAll<IImportService>();
+                    services.AddSingleton<IImportService, UnknownErrorImportService>();
+                }
             });
+    }
+
+    private sealed class UnknownErrorImportService : IImportService
+    {
+        public const string InternalMessage =
+            "raw password cell: never-render-this-internal-detail";
+
+        public Task<ImportPreview> PreviewAsync(
+            Stream source,
+            ImportFileType type,
+            Guid actorId,
+            CancellationToken ct) =>
+            Task.FromResult(new ImportPreview(
+                Guid.NewGuid(),
+                1,
+                0,
+                0,
+                0,
+                [new ImportRowError(2, "Password", InternalMessage)],
+                true,
+                DateTimeOffset.UtcNow.AddMinutes(15)));
+
+        public Task<ImportCommitResult> CommitAsync(
+            Guid previewId,
+            Guid actorId,
+            CancellationToken ct) =>
+            throw new NotSupportedException();
     }
 
     private sealed class StubSecretCipher : ISecretCipher

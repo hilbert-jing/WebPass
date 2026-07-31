@@ -3,6 +3,7 @@ using System.Net;
 using System.Security.Claims;
 using System.Text;
 using System.Text.RegularExpressions;
+using ClosedXML.Excel;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Hosting;
@@ -13,6 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using WebPass.Web.Application.Authorization;
+using WebPass.Web.Application.Secrets;
 using WebPass.Web.Data;
 using WebPass.Web.Domain.Entities;
 using WebPass.Web.Domain.Enums;
@@ -23,6 +25,9 @@ namespace WebPass.IntegrationTests.Exporting;
 
 public sealed class ExportPageTests
 {
+    private const string UniqueServerPassword =
+        "ordinary-export-secret-8f62f8a3";
+
     [Fact]
     public async Task Export_page_renders_chinese_secret_free_scope()
     {
@@ -110,14 +115,21 @@ public sealed class ExportPageTests
             var csv = Encoding.UTF8.GetString(content);
             Assert.Contains("10.0.0.10", csv, StringComparison.Ordinal);
             Assert.DoesNotContain(
-                "server-password",
+                UniqueServerPassword,
                 csv,
                 StringComparison.Ordinal);
         }
         else
         {
-            Assert.Equal((byte)'P', content[0]);
-            Assert.Equal((byte)'K', content[1]);
+            using var workbook = new XLWorkbook(new MemoryStream(content));
+            Assert.Contains(
+                workbook.Worksheets.SelectMany(sheet => sheet.CellsUsed()),
+                cell => cell.GetString() == "10.0.0.10");
+            Assert.DoesNotContain(
+                workbook.Worksheets.SelectMany(sheet => sheet.CellsUsed()),
+                cell => cell.GetString().Contains(
+                    UniqueServerPassword,
+                    StringComparison.Ordinal));
         }
     }
 
@@ -183,7 +195,7 @@ public sealed class ExportPageTests
                 Location = "DC",
             };
             db.Subnets.Add(subnet);
-            db.ServerAssets.Add(new ServerAsset
+            var asset = new ServerAsset
             {
                 SubnetId = subnet.Id,
                 BusinessIp = "10.0.0.10",
@@ -193,6 +205,16 @@ public sealed class ExportPageTests
                 ComputerName = "server-10",
                 SystemName = "ERP",
                 CreatedBy = _userId,
+            };
+            db.ServerAssets.Add(asset);
+            db.ServerSecrets.Add(new ServerSecret
+            {
+                ServerAssetId = asset.Id,
+                Ciphertext = [1],
+                Nonce = new byte[12],
+                AuthenticationTag = new byte[16],
+                KeyVersion = 1,
+                UpdatedBy = _userId,
             });
             db.SaveChanges();
         }
@@ -235,6 +257,23 @@ public sealed class ExportPageTests
                 services.RemoveAll<IDbContextOptionsConfiguration<WebPassDbContext>>();
                 services.AddDbContext<WebPassDbContext>(
                     options => options.UseInMemoryDatabase(_databaseName));
+                services.RemoveAll<ISecretCipher>();
+                services.AddSingleton<ISecretCipher, StubSecretCipher>();
             });
+    }
+
+    private sealed class StubSecretCipher : ISecretCipher
+    {
+        public Task<SecretEnvelope> EncryptAsync(
+            Guid secretId,
+            string plaintext,
+            CancellationToken ct) =>
+            throw new NotSupportedException();
+
+        public Task<string> DecryptAsync(
+            Guid secretId,
+            SecretEnvelope envelope,
+            CancellationToken ct) =>
+            Task.FromResult(UniqueServerPassword);
     }
 }
