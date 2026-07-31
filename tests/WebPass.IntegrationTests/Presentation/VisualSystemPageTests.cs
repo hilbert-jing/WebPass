@@ -76,6 +76,32 @@ public sealed class VisualSystemPageTests
     }
 
     [Fact]
+    public async Task Enhancement_boot_is_a_blocking_local_head_script_before_stylesheet()
+    {
+        using var factory = new PresentationFactory();
+        using var client = factory.CreateClient();
+
+        var html = await client.GetStringAsync("/login");
+        using var bootResponse = await client.GetAsync("/js/enhance-boot.js");
+        var bootTag = Regex.Match(
+            html,
+            "<script[^>]*src=\"/js/enhance-boot\\.js\"[^>]*></script>",
+            RegexOptions.IgnoreCase).Value;
+        var stylesheetPosition = html.IndexOf(
+            "<link rel=\"stylesheet\" href=\"/css/site.css\"",
+            StringComparison.Ordinal);
+
+        Assert.True(bootResponse.IsSuccessStatusCode);
+        Assert.NotEmpty(bootTag);
+        Assert.DoesNotContain(" defer", bootTag, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(" async", bootTag, StringComparison.OrdinalIgnoreCase);
+        Assert.InRange(
+            html.IndexOf(bootTag, StringComparison.Ordinal),
+            0,
+            stylesheetPosition - 1);
+    }
+
+    [Fact]
     public async Task Server_inventory_renders_subnet_rail_and_drawer_contracts()
     {
         using var factory = new PresentationFactory();
@@ -203,7 +229,7 @@ public sealed class VisualSystemPageTests
             "(?ms)^\\.drawer\\s*\\{(?<rules>.*?)^\\}").Groups["rules"].Value;
         var enhanced = Regex.Match(
             css,
-            "(?ms)^body\\[data-js-enabled\\] \\.drawer\\s*\\{(?<rules>.*?)^\\}")
+            "(?ms)^html\\[data-js-enabled\\] \\.drawer\\s*\\{(?<rules>.*?)^\\}")
             .Groups["rules"].Value;
 
         Assert.Contains("position: static", baseline, StringComparison.Ordinal);
@@ -827,11 +853,18 @@ public sealed class VisualSystemPageTests
         using var client = factory.CreateClient();
 
         var script = await client.GetStringAsync("/js/site.js");
+        using var bootResponse = await client.GetAsync("/js/enhance-boot.js");
+        var bootScript = bootResponse.IsSuccessStatusCode
+            ? await bootResponse.Content.ReadAsStringAsync()
+            : string.Empty;
         var harness =
             """
             import assert from "node:assert/strict";
             import vm from "node:vm";
 
+            const bootSource = Buffer
+                .from(process.env.WEBPASS_BOOT_SCRIPT_BASE64, "base64")
+                .toString("utf8");
             const source = Buffer
                 .from(process.env.WEBPASS_SITE_SCRIPT_BASE64, "base64")
                 .toString("utf8");
@@ -907,18 +940,20 @@ public sealed class VisualSystemPageTests
                         this === drawer &&
                         name === "aria-hidden") {
                         assert.equal(
-                            body.hasAttribute("data-js-enabled"),
+                            html.hasAttribute("data-js-enabled"),
                             true,
-                            "The external script must mark enhancement before hiding a drawer");
+                            "The head boot script must mark enhancement before hiding a drawer");
                     }
                     this.attributes.set(name, String(value));
                 }
             }
 
-            const body = new Element("body");
+            const html = new Element("html");
+            const body = html.add(new Element("body"));
             const document = {
                 activeElement: null,
                 body,
+                documentElement: html,
                 addEventListener(type, handler) {
                     documentListeners.set(type, handler);
                 },
@@ -989,10 +1024,11 @@ public sealed class VisualSystemPageTests
             };
 
             vm.createContext(sandbox);
+            vm.runInContext(bootSource, sandbox);
             vm.runInContext(source, sandbox);
 
             if (scenario === "enhancement-marker") {
-                assert.equal(body.hasAttribute("data-js-enabled"), true);
+                assert.equal(html.hasAttribute("data-js-enabled"), true);
                 assert.equal(drawer.getAttribute("aria-hidden"), "true");
             }
 
@@ -1033,6 +1069,8 @@ public sealed class VisualSystemPageTests
         process.StartInfo.ArgumentList.Add("--input-type=module");
         process.StartInfo.ArgumentList.Add("--eval");
         process.StartInfo.ArgumentList.Add(harness);
+        process.StartInfo.Environment["WEBPASS_BOOT_SCRIPT_BASE64"] =
+            Convert.ToBase64String(Encoding.UTF8.GetBytes(bootScript));
         process.StartInfo.Environment["WEBPASS_SITE_SCRIPT_BASE64"] =
             Convert.ToBase64String(Encoding.UTF8.GetBytes(script));
         process.StartInfo.Environment["WEBPASS_SITE_SCENARIO"] = scenario;

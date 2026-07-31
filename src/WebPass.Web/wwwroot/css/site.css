@@ -127,7 +127,7 @@ input[type="submit"]:disabled,
     display: none;
 }
 
-body[data-js-enabled] [data-js-only] {
+html[data-js-enabled] [data-js-only] {
     display: inline-flex;
 }
 
@@ -537,7 +537,7 @@ table tbody tr:last-child td {
     padding: 20px;
 }
 
-body[data-js-enabled] .drawer {
+html[data-js-enabled] .drawer {
     position: fixed;
     z-index: 100;
     inset: 0 0 0 auto;
@@ -556,7 +556,7 @@ body[data-js-enabled] .drawer {
     visibility: hidden;
 }
 
-body[data-js-enabled] .drawer[data-open] {
+html[data-js-enabled] .drawer[data-open] {
     transform: translateX(0);
     visibility: visible;
 }

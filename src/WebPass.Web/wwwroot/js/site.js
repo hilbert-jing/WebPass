@@ -1,6 +1,4 @@
 (() => {
-    document.body?.setAttribute("data-js-enabled", "");
-
     const focusable = "a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex='-1'])";
     const drawerOpeners = new WeakMap();
     const mobileNavigation = window.matchMedia?.("(max-width: 767px)") ?? null;
