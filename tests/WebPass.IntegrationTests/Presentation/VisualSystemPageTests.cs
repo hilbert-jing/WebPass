@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.RegularExpressions;
 using WebPass.Web.Application.Authorization;
 using WebPass.Web.Domain.Entities;
@@ -128,6 +129,59 @@ public sealed class VisualSystemPageTests
             "drawerOpeners.set(drawer, opener);",
             script,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Subnet_management_renders_drawer_preview_and_collapsed_edit_contracts()
+    {
+        using var factory = new PresentationFactory();
+        factory.InitializeUser(false, PermissionCode.SubnetManage);
+        factory.Seed(db => db.Subnets.Add(new Subnet
+        {
+            Name = "生产网段",
+            Cidr = "10.0.0.0/24",
+            NetworkAddress = "10.0.0.0",
+            PrefixLength = 24,
+            Location = "总部",
+            IsEnabled = true,
+            RowVersion = [1],
+        }));
+        using var client = factory.CreateAuthenticatedClient();
+
+        var html = WebUtility.HtmlDecode(await client.GetStringAsync("/subnets"));
+
+        Assert.Contains("网段管理", html, StringComparison.Ordinal);
+        Assert.Contains("添加网段", html, StringComparison.Ordinal);
+        Assert.Contains("data-drawer=\"create-subnet\"", html, StringComparison.Ordinal);
+        Assert.Contains("data-subnet-preview-form", html, StringComparison.Ordinal);
+        Assert.Contains("data-subnet-preview-result", html, StringComparison.Ordinal);
+        Assert.Contains("data-subnet-edit", html, StringComparison.Ordinal);
+        Assert.Contains("<noscript>", html, StringComparison.Ordinal);
+        Assert.Contains("formaction=\"?handler=Preview\"", html, StringComparison.Ordinal);
+        Assert.Contains("生产网段", html, StringComparison.Ordinal);
+        Assert.Contains("10.0.0.0/24", html, StringComparison.Ordinal);
+        Assert.Contains("停用后，新服务器不能再登记到此网段。", html, StringComparison.Ordinal);
+        Assert.Contains("删除“生产网段”（10.0.0.0/24）", html, StringComparison.Ordinal);
+        Assert.Contains("/js/subnet-preview.js", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Subnet_preview_script_posts_urlencoded_fields_and_renders_server_errors_as_text()
+    {
+        using var factory = new PresentationFactory();
+        using var client = factory.CreateClient();
+
+        var script = await client.GetStringAsync("/js/subnet-preview.js");
+
+        Assert.Contains("new URLSearchParams", script, StringComparison.Ordinal);
+        Assert.Contains("?handler=Preview", script, StringComparison.Ordinal);
+        Assert.Contains("credentials: \"same-origin\"", script, StringComparison.Ordinal);
+        Assert.Contains("result.textContent", script, StringComparison.Ordinal);
+        Assert.Contains("result.setAttribute(\"role\", \"alert\")", script, StringComparison.Ordinal);
+        Assert.Contains("networkAddress", script, StringComparison.Ordinal);
+        Assert.Contains("broadcastAddress", script, StringComparison.Ordinal);
+        Assert.Contains("usableAddressCount", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("innerHTML", script, StringComparison.Ordinal);
     }
 
     [Fact]

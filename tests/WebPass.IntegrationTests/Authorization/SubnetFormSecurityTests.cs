@@ -112,6 +112,121 @@ public sealed class SubnetFormSecurityTests
         Assert.True((await factory.GetSubnetsAsync()).Single().IsEnabled);
     }
 
+    [Fact]
+    public async Task Invalid_preview_keeps_bad_request_status_and_returns_an_actionable_error()
+    {
+        using var factory = NewFactory(PermissionCode.SubnetManage);
+        factory.InitializeData();
+        using var client = factory.CreateAuthenticatedClient();
+        var token = await GetAntiforgeryTokenAsync(client);
+        var form = Form(token);
+        form.RemoveAll(field => field.Key == "Input.Cidr");
+        form.Add(new KeyValuePair<string, string>("Input.Cidr", "not-a-cidr"));
+
+        var response = await client.PostAsync(
+            "/subnets?handler=Preview",
+            new FormUrlEncodedContent(form));
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains(
+            "\"error\":\"网段信息无效，请检查 CIDR 和必填字段。\"",
+            body,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Empty_create_fields_render_chinese_required_errors_without_creating_a_subnet()
+    {
+        using var factory = NewFactory(PermissionCode.SubnetManage);
+        factory.InitializeData();
+        using var client = factory.CreateAuthenticatedClient();
+        var token = await GetAntiforgeryTokenAsync(client);
+        var form = Form(token);
+        form.RemoveAll(field => field.Key is "Input.Name" or "Input.Cidr" or "Input.Location");
+        form.Add(new KeyValuePair<string, string>("Input.Name", ""));
+        form.Add(new KeyValuePair<string, string>("Input.Cidr", ""));
+        form.Add(new KeyValuePair<string, string>("Input.Location", ""));
+
+        var response = await client.PostAsync(
+            "/subnets?handler=Create",
+            new FormUrlEncodedContent(form));
+        var html = WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("请输入网段名称。", html, StringComparison.Ordinal);
+        Assert.Contains("请输入 CIDR。", html, StringComparison.Ordinal);
+        Assert.Contains("请输入位置。", html, StringComparison.Ordinal);
+        Assert.Empty(await factory.GetSubnetsAsync());
+    }
+
+    [Fact]
+    public async Task Overlapping_create_renders_an_actionable_error_without_changing_the_page_status()
+    {
+        using var factory = NewFactory(PermissionCode.SubnetManage);
+        factory.InitializeData();
+        await factory.AddSubnetAsync("10.20.30.0/24", "10.20.30.0");
+        using var client = factory.CreateAuthenticatedClient();
+        var token = await GetAntiforgeryTokenAsync(client);
+
+        var response = await client.PostAsync(
+            "/subnets?handler=Create",
+            new FormUrlEncodedContent(Form(token)));
+        var html = WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("无法保存网段：该范围与现有网段重叠。", html, StringComparison.Ordinal);
+        Assert.Single(await factory.GetSubnetsAsync());
+    }
+
+    [Fact]
+    public async Task Shrinking_past_an_asset_renders_an_actionable_error_without_changing_the_page_status()
+    {
+        using var factory = NewFactory(PermissionCode.SubnetManage);
+        factory.InitializeData();
+        await factory.AddSubnetAsync(withAsset: true);
+        using var client = factory.CreateAuthenticatedClient();
+        var token = await GetAntiforgeryTokenAsync(client);
+        var subnet = (await factory.GetSubnetsAsync()).Single();
+        var form = Form(token);
+        form.RemoveAll(field => field.Key == "Input.Cidr");
+        form.Add(new KeyValuePair<string, string>("Input.Cidr", "10.0.0.0/30"));
+        form.Add(new KeyValuePair<string, string>("id", subnet.Id.ToString()));
+        form.Add(new KeyValuePair<string, string>("rowVersion", Convert.ToBase64String(subnet.RowVersion)));
+
+        var response = await client.PostAsync(
+            "/subnets?handler=Edit",
+            new FormUrlEncodedContent(form));
+        var html = WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("无法缩小网段：已有服务器地址将落在新范围之外。", html, StringComparison.Ordinal);
+        Assert.Equal("10.0.0.0/24", (await factory.GetSubnetsAsync()).Single().Cidr);
+    }
+
+    [Fact]
+    public async Task Deleting_a_subnet_with_assets_renders_an_actionable_error_without_changing_the_page_status()
+    {
+        using var factory = NewFactory(PermissionCode.SubnetManage);
+        factory.InitializeData();
+        await factory.AddSubnetAsync(withAsset: true);
+        using var client = factory.CreateAuthenticatedClient();
+        var token = await GetAntiforgeryTokenAsync(client);
+        var subnet = (await factory.GetSubnetsAsync()).Single();
+        var form = Form(token);
+        form.Add(new KeyValuePair<string, string>("id", subnet.Id.ToString()));
+        form.Add(new KeyValuePair<string, string>("rowVersion", Convert.ToBase64String(subnet.RowVersion)));
+
+        var response = await client.PostAsync(
+            "/subnets?handler=Delete",
+            new FormUrlEncodedContent(form));
+        var html = WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("无法删除网段：请先解除关联服务器，或停用该网段。", html, StringComparison.Ordinal);
+        Assert.Single(await factory.GetSubnetsAsync());
+    }
+
     private static SubnetCookieFactory NewFactory(params string[] permissions) => new(NewUser(), permissions);
     private static AppUser NewUser() => new() { Username = Guid.NewGuid().ToString("N"), PasswordHash = "hash" };
 
@@ -187,11 +302,35 @@ public sealed class SubnetFormSecurityTests
             await db.SaveChangesAsync();
         }
 
-        public async Task AddSubnetAsync()
+        public async Task AddSubnetAsync(
+            string cidr = "10.0.0.0/24",
+            string networkAddress = "10.0.0.0",
+            bool withAsset = false)
         {
             using var scope = Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<WebPassDbContext>();
-            db.Subnets.Add(new Subnet { Name = "Existing", Cidr = "10.0.0.0/24", NetworkAddress = "10.0.0.0", PrefixLength = 24, Location = "HQ" });
+            var subnet = new Subnet
+            {
+                Name = "Existing",
+                Cidr = cidr,
+                NetworkAddress = networkAddress,
+                PrefixLength = 24,
+                Location = "HQ",
+                RowVersion = [1],
+            };
+            db.Subnets.Add(subnet);
+            if (withAsset)
+            {
+                db.ServerAssets.Add(new ServerAsset
+                {
+                    SubnetId = subnet.Id,
+                    BusinessIp = "10.0.0.9",
+                    BusinessIpNumber = 167772169,
+                    Location = "HQ",
+                    ComputerName = "web-09",
+                    SystemName = "WebPass",
+                });
+            }
             await db.SaveChangesAsync();
         }
 
