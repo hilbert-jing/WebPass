@@ -11,6 +11,33 @@ namespace WebPass.IntegrationTests.Presentation;
 
 public sealed class VisualSystemPageTests
 {
+    [Fact]
+    public async Task Login_submit_control_exposes_idle_and_busy_labels()
+    {
+        using var factory = new PresentationFactory();
+        using var client = factory.CreateClient();
+
+        var html = await client.GetStringAsync("/login");
+        var submitButton = Regex.Match(
+            html,
+            "<button[^>]*type=\"submit\"[^>]*>.*?</button>",
+            RegexOptions.Singleline).Value;
+
+        Assert.Contains(
+            "data-submit-label=\"正在登录\"",
+            submitButton,
+            StringComparison.Ordinal);
+        Assert.Equal(
+            "登录",
+            Regex.Replace(
+                Regex.Match(
+                    submitButton,
+                    ">(?<label>.*?)</button>",
+                    RegexOptions.Singleline).Groups["label"].Value,
+                "\\s+",
+                " ").Trim());
+    }
+
     [Theory]
     [InlineData("/login", "登录 WebPass")]
     [InlineData("/secrets/reauthenticate", "验证当前密码")]
