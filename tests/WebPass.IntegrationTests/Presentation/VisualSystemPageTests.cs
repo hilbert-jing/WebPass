@@ -700,6 +700,31 @@ public sealed class VisualSystemPageTests
     }
 
     [Fact]
+    public async Task Local_svg_favicon_is_linked_and_self_contained()
+    {
+        using var factory = new PresentationFactory();
+        using var client = factory.CreateClient();
+
+        var html = await client.GetStringAsync("/login");
+        using var response = await client.GetAsync("/favicon.svg");
+        var favicon = await response.Content.ReadAsStringAsync();
+
+        Assert.Contains(
+            "<link rel=\"icon\" type=\"image/svg+xml\" href=\"/favicon.svg\"",
+            html,
+            StringComparison.Ordinal);
+        response.EnsureSuccessStatusCode();
+        Assert.Equal(
+            "image/svg+xml",
+            response.Content.Headers.ContentType?.MediaType);
+        Assert.Contains("<svg", favicon, StringComparison.Ordinal);
+        Assert.DoesNotContain("<script", favicon, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotMatch(
+            "(?:href|src)\\s*=\\s*[\"']https?://",
+            favicon);
+    }
+
+    [Fact]
     public async Task Stylesheet_defines_desktop_tablet_and_mobile_layout_contracts()
     {
         using var factory = new PresentationFactory();
