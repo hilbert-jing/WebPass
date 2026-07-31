@@ -113,8 +113,11 @@
             }
 
             const isOpen = sidebar.hasAttribute("data-open");
+            const shouldMoveFocus = !isOpen &&
+                sidebar.contains(document.activeElement);
             sidebar.setAttribute("aria-hidden", isOpen ? "false" : "true");
             button.setAttribute("aria-expanded", isOpen ? "true" : "false");
+            if (shouldMoveFocus) button.focus();
         });
     }
 

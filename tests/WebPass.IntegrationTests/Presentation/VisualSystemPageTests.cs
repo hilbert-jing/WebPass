@@ -783,9 +783,12 @@ public sealed class VisualSystemPageTests
             assert.equal(sidebar.hasAttribute("aria-hidden"), false);
             assert.equal(mediaListeners.length, 1);
 
+            navLink.focus();
             media.matches = true;
             mediaListeners[0]({ matches: true });
             assert.equal(sidebar.getAttribute("aria-hidden"), "true");
+            assert.equal(toggle.getAttribute("aria-expanded"), "false");
+            assert.equal(toggle.focused, true);
 
             toggle.listeners.get("click")();
             assert.equal(sidebar.hasAttribute("data-open"), true);
