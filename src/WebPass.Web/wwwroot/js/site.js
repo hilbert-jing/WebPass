@@ -8,6 +8,23 @@
         return document.getElementById(id.replace(/^#/, ""));
     }
 
+    function findDrawerOpener(drawer) {
+        return Array.from(document.querySelectorAll(
+            "[data-drawer-open], [data-nav-toggle]"))
+            .find(candidate => {
+                const target = candidate.dataset.drawerOpen ??
+                    candidate.getAttribute("aria-controls");
+                return getDrawer(target) === drawer;
+            });
+    }
+
+    function moveFocusOutsideBeforeHide(drawer, preferredTarget) {
+        if (!drawer.contains(document.activeElement)) return;
+        (preferredTarget ??
+            drawerOpeners.get(drawer) ??
+            document.getElementById("main-content"))?.focus();
+    }
+
     function openDrawer(id, opener) {
         const drawer = getDrawer(id);
         if (!drawer) return;
@@ -26,8 +43,8 @@
     function closeDrawer(drawer) {
         if (!drawer) return;
 
-        const opener = drawerOpeners.get(drawer);
-        (opener ?? document.getElementById("main-content"))?.focus();
+        const opener = drawerOpeners.get(drawer) ?? findDrawerOpener(drawer);
+        moveFocusOutsideBeforeHide(drawer, opener);
         opener?.setAttribute("aria-expanded", "false");
         drawer.removeAttribute("data-open");
         if (drawer.hasAttribute("aria-hidden")) {
@@ -36,12 +53,20 @@
         drawerOpeners.delete(drawer);
     }
 
-    document.querySelectorAll(".drawer[data-drawer]").forEach(drawer => {
+    document.querySelectorAll("[data-drawer]").forEach(drawer => {
         const isOpen = drawer.hasAttribute("data-open");
-        drawer.setAttribute("aria-hidden", isOpen ? "false" : "true");
+        const opener = findDrawerOpener(drawer);
+        const isResponsiveNavigation =
+            opener?.hasAttribute("data-nav-toggle") === true;
 
-        const opener = Array.from(document.querySelectorAll("[data-drawer-open]"))
-            .find(candidate => getDrawer(candidate.dataset.drawerOpen) === drawer);
+        if (isResponsiveNavigation && !mobileNavigation?.matches) {
+            drawer.removeAttribute("aria-hidden");
+            opener.setAttribute("aria-expanded", "false");
+            return;
+        }
+
+        if (!isOpen) moveFocusOutsideBeforeHide(drawer, opener);
+        drawer.setAttribute("aria-hidden", isOpen ? "false" : "true");
         if (!opener) return;
 
         opener.setAttribute("aria-expanded", isOpen ? "true" : "false");
@@ -97,24 +122,22 @@
             if (!sidebar) return;
 
             if (!mobileNavigation?.matches) {
-                const shouldMoveFocus = sidebar.hasAttribute("data-open") &&
-                    sidebar.contains(document.activeElement);
+                const wasOpen = sidebar.hasAttribute("data-open");
+                const firstNavigationLink =
+                    sidebar.querySelector(".primary-nav a");
+                if (wasOpen) {
+                    moveFocusOutsideBeforeHide(
+                        sidebar,
+                        firstNavigationLink);
+                }
                 sidebar.removeAttribute("data-open");
                 sidebar.removeAttribute("aria-hidden");
                 button.setAttribute("aria-expanded", "false");
-                if (shouldMoveFocus) {
-                    const firstNavigationLink =
-                        sidebar.querySelector(".primary-nav a");
-                    (firstNavigationLink ??
-                        document.getElementById("main-content"))?.focus();
-                }
                 return;
             }
 
             const isOpen = sidebar.hasAttribute("data-open");
-            const shouldMoveFocus = !isOpen &&
-                sidebar.contains(document.activeElement);
-            if (shouldMoveFocus) button.focus();
+            if (!isOpen) moveFocusOutsideBeforeHide(sidebar, button);
             sidebar.setAttribute("aria-hidden", isOpen ? "false" : "true");
             button.setAttribute("aria-expanded", isOpen ? "true" : "false");
         });

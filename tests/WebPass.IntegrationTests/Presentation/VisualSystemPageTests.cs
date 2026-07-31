@@ -120,7 +120,7 @@ public sealed class VisualSystemPageTests
         Assert.Contains("aria-expanded=\"true\"", html, StringComparison.Ordinal);
         Assert.Contains("<noscript>", html, StringComparison.Ordinal);
         Assert.Contains(
-            "document.querySelectorAll(\".drawer[data-drawer]\")",
+            "document.querySelectorAll(\"[data-drawer]\")",
             script,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -743,11 +743,12 @@ public sealed class VisualSystemPageTests
             const closeButton = new Element();
             const navLink = new Element();
             const toggle = new Element();
+            toggle.setAttribute("data-nav-toggle", "");
             toggle.setAttribute("aria-controls", sidebar.id);
             toggle.setAttribute("aria-expanded", "false");
             const documentListeners = new Map();
             const media = {
-                matches: false,
+                matches: true,
                 addEventListener(type, handler) {
                     if (type === "change") mediaListeners.push(handler);
                 },
@@ -764,6 +765,11 @@ public sealed class VisualSystemPageTests
                     return null;
                 },
                 querySelectorAll(selector) {
+                    if (selector === ".drawer[data-drawer]" ||
+                        selector === "[data-drawer]") return [sidebar];
+                    if (selector === "[data-drawer-open], [data-nav-toggle]") {
+                        return [toggle];
+                    }
                     if (selector === "[data-nav-toggle]") return [toggle];
                     if (selector === "[data-drawer][data-open]") {
                         return sidebar.hasAttribute("data-open") ? [sidebar] : [];
@@ -789,11 +795,18 @@ public sealed class VisualSystemPageTests
                 },
             };
 
+            navLink.focus();
             vm.createContext(sandbox);
             vm.runInContext(source, sandbox);
 
-            assert.equal(sidebar.hasAttribute("aria-hidden"), false);
+            assert.equal(sidebar.getAttribute("aria-hidden"), "true");
+            assert.equal(toggle.getAttribute("aria-expanded"), "false");
+            assert.equal(toggle.focused, true);
             assert.equal(mediaListeners.length, 1);
+
+            media.matches = false;
+            mediaListeners[0]({ matches: false });
+            assert.equal(sidebar.hasAttribute("aria-hidden"), false);
 
             navLink.focus();
             media.matches = true;
