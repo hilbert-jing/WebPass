@@ -65,7 +65,6 @@
                             <label for="subnet-notes-@subnet.Id">备注</label>
                             <textarea id="subnet-notes-@subnet.Id" name="Input.Notes">@subnet.Notes</textarea>
                         </div>
-                        <input type="hidden" name="Input.IsEnabled" value="false" />
                         <div>
                             <input id="subnet-enabled-@subnet.Id"
                                    type="checkbox"
@@ -74,6 +73,7 @@
                                    checked="@subnet.IsEnabled" />
                             <label for="subnet-enabled-@subnet.Id">启用此网段</label>
                         </div>
+                        <input type="hidden" name="Input.IsEnabled" value="false" />
                         <button type="submit" data-submit-label="正在保存">保存修改</button>
                     </form>
                 </details>

@@ -51,6 +51,42 @@ public sealed class SubnetFormSecurityTests
     }
 
     [Fact]
+    public async Task Valid_antiforgery_post_reaches_the_named_preview_handler_with_the_posted_cidr()
+    {
+        using var factory = NewFactory(PermissionCode.SubnetManage);
+        factory.InitializeData();
+        using var client = factory.CreateAuthenticatedClient();
+        var token = await GetAntiforgeryTokenAsync(client);
+
+        var response = await client.PostAsync(
+            "/subnets?handler=Preview",
+            new FormUrlEncodedContent(Form(token)));
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("\"networkAddress\":\"10.20.30.0\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"broadcastAddress\":\"10.20.30.255\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"usableAddressCount\":254", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Missing_antiforgery_token_is_rejected_before_the_named_preview_handler()
+    {
+        using var factory = NewFactory(PermissionCode.SubnetManage);
+        factory.InitializeData();
+        using var client = factory.CreateAuthenticatedClient();
+        await GetAntiforgeryTokenAsync(client);
+
+        var response = await client.PostAsync(
+            "/subnets?handler=Preview",
+            new FormUrlEncodedContent(Form(null)));
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.DoesNotContain("networkAddress", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Missing_or_invalid_antiforgery_token_is_rejected_before_the_handler()
     {
         using var factory = NewFactory(PermissionCode.SubnetManage);
@@ -109,6 +145,51 @@ public sealed class SubnetFormSecurityTests
         var response = await client.PostAsync("/subnets?handler=SetEnabled", new FormUrlEncodedContent(form));
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.True((await factory.GetSubnetsAsync()).Single().IsEnabled);
+    }
+
+    [Fact]
+    public async Task Browser_checkbox_payload_does_not_silently_disable_an_enabled_subnet_during_edit()
+    {
+        using var factory = NewFactory(PermissionCode.SubnetManage);
+        factory.InitializeData();
+        await factory.AddSubnetAsync();
+        using var client = factory.CreateAuthenticatedClient();
+        var token = await GetAntiforgeryTokenAsync(client);
+        var subnet = (await factory.GetSubnetsAsync()).Single();
+        var html = await client.GetStringAsync("/subnets");
+        var editForm = Regex.Match(
+            html,
+            "<form[^>]*action=\"/subnets\\?handler=Edit\"[^>]*>.*?</form>",
+            RegexOptions.Singleline).Value;
+        var enabledInputs = Regex.Matches(
+            editForm,
+            "<input[^>]*name=\"Input.IsEnabled\"[^>]*>",
+            RegexOptions.Singleline);
+        var form = Form(token);
+        form.RemoveAll(field => field.Key == "Input.IsEnabled");
+        foreach (Match input in enabledInputs)
+        {
+            var type = Regex.Match(input.Value, "type=\"([^\"]+)\"").Groups[1].Value;
+            if (type == "checkbox" &&
+                !input.Value.Contains("checked", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var value = Regex.Match(input.Value, "value=\"([^\"]+)\"").Groups[1].Value;
+            form.Add(new KeyValuePair<string, string>("Input.IsEnabled", value));
+        }
+        form.Add(new KeyValuePair<string, string>("id", subnet.Id.ToString()));
+        form.Add(new KeyValuePair<string, string>(
+            "rowVersion",
+            Convert.ToBase64String(subnet.RowVersion)));
+
+        var response = await client.PostAsync(
+            "/subnets?handler=Edit",
+            new FormUrlEncodedContent(form));
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
         Assert.True((await factory.GetSubnetsAsync()).Single().IsEnabled);
     }
 
