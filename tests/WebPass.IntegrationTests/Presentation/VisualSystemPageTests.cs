@@ -568,4 +568,273 @@ public sealed class VisualSystemPageTests
         Assert.Contains(".sidebar-logout {", css, StringComparison.Ordinal);
         Assert.Contains("clip-path: none", css, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task Pages_expose_skip_link_main_landmark_and_explicit_labels()
+    {
+        using var factory = new PresentationFactory();
+        factory.InitializeUser(true);
+        using var client = factory.CreateAuthenticatedClient();
+
+        var html = await client.GetStringAsync("/servers");
+
+        Assert.Contains("href=\"#main-content\"", html, StringComparison.Ordinal);
+        Assert.Contains("<main id=\"main-content\"", html, StringComparison.Ordinal);
+        Assert.Contains("aria-current=\"page\"", html, StringComparison.Ordinal);
+        var placeholderInputs = Regex.Matches(
+            html,
+            "<input(?=[^>]*placeholder=)(?<attributes>[^>]*)>",
+            RegexOptions.IgnoreCase);
+        foreach (Match input in placeholderInputs)
+        {
+            var id = Regex.Match(
+                input.Groups["attributes"].Value,
+                "id=\"(?<id>[^\"]+)\"",
+                RegexOptions.IgnoreCase).Groups["id"].Value;
+            Assert.False(
+                string.IsNullOrWhiteSpace(id),
+                "Inputs with placeholder text must expose an id for an explicit label.");
+            Assert.Contains(
+                $"<label for=\"{id}\"",
+                html,
+                StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public async Task Static_assets_do_not_reference_remote_resources()
+    {
+        using var factory = new PresentationFactory();
+        using var client = factory.CreateClient();
+
+        var assets = string.Join('\n', new[]
+        {
+            await client.GetStringAsync("/css/site.css"),
+            await client.GetStringAsync("/js/site.js"),
+            await client.GetStringAsync("/js/secret-reveal.js"),
+            await client.GetStringAsync("/js/subnet-preview.js"),
+        });
+
+        Assert.DoesNotContain(
+            "https://",
+            assets,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(
+            "http://",
+            assets,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Stylesheet_defines_desktop_tablet_and_mobile_layout_contracts()
+    {
+        using var factory = new PresentationFactory();
+        using var client = factory.CreateClient();
+
+        var css = await client.GetStringAsync("/css/site.css");
+
+        Assert.Contains(
+            "@media (min-width: 1280px)",
+            css,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "grid-template-columns: 232px minmax(0, 1fr)",
+            css,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "@media (min-width: 768px) and (max-width: 1279px)",
+            css,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "width: min(88vw, 320px)",
+            css,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            ".form-grid",
+            css,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            ".data-table-wrap",
+            css,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "max-height: 100dvh",
+            css,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Mobile_navigation_updates_visibility_and_restores_keyboard_focus()
+    {
+        using var factory = new PresentationFactory();
+        using var client = factory.CreateClient();
+
+        var script = await client.GetStringAsync("/js/site.js");
+        var harness =
+            """
+            import assert from "node:assert/strict";
+            import vm from "node:vm";
+
+            const source = Buffer
+                .from(process.env.WEBPASS_SITE_SCRIPT_BASE64, "base64")
+                .toString("utf8");
+            const mediaListeners = [];
+
+            class Element {
+                constructor(id = "") {
+                    this.id = id;
+                    this.dataset = {};
+                    this.attributes = new Map();
+                    this.listeners = new Map();
+                    this.focused = false;
+                }
+                addEventListener(type, handler) {
+                    this.listeners.set(type, handler);
+                }
+                closest() {
+                    return null;
+                }
+                contains(element) {
+                    return this === element ||
+                        (this === sidebar &&
+                            (element === closeButton || element === navLink));
+                }
+                focus() {
+                    closeButton.focused = false;
+                    navLink.focused = false;
+                    toggle.focused = false;
+                    this.focused = true;
+                    document.activeElement = this;
+                }
+                getAttribute(name) {
+                    return this.attributes.get(name) ?? null;
+                }
+                hasAttribute(name) {
+                    return this.attributes.has(name);
+                }
+                querySelector(selector) {
+                    if (selector === "[data-drawer-initial-focus]") {
+                        return closeButton;
+                    }
+                    if (selector === ".primary-nav a") return navLink;
+                    return null;
+                }
+                removeAttribute(name) {
+                    this.attributes.delete(name);
+                }
+                setAttribute(name, value) {
+                    this.attributes.set(name, String(value));
+                }
+            }
+
+            const sidebar = new Element("app-sidebar");
+            const closeButton = new Element();
+            const navLink = new Element();
+            const toggle = new Element();
+            toggle.setAttribute("aria-controls", sidebar.id);
+            toggle.setAttribute("aria-expanded", "false");
+            const documentListeners = new Map();
+            const media = {
+                matches: false,
+                addEventListener(type, handler) {
+                    if (type === "change") mediaListeners.push(handler);
+                },
+            };
+            const document = {
+                activeElement: null,
+                addEventListener(type, handler) {
+                    documentListeners.set(type, handler);
+                },
+                getElementById(id) {
+                    return id === sidebar.id ? sidebar : null;
+                },
+                querySelector() {
+                    return null;
+                },
+                querySelectorAll(selector) {
+                    if (selector === "[data-nav-toggle]") return [toggle];
+                    if (selector === "[data-drawer][data-open]") {
+                        return sidebar.hasAttribute("data-open") ? [sidebar] : [];
+                    }
+                    return [];
+                },
+            };
+            const sandbox = {
+                console,
+                DataTransfer: class {},
+                document,
+                Element,
+                HTMLButtonElement: class extends Element {},
+                HTMLInputElement: class extends Element {},
+                HTMLSelectElement: class extends Element {},
+                navigator: {},
+                window: {
+                    matchMedia(query) {
+                        assert.equal(query, "(max-width: 767px)");
+                        return media;
+                    },
+                    setTimeout() {},
+                },
+            };
+
+            vm.createContext(sandbox);
+            vm.runInContext(source, sandbox);
+
+            assert.equal(sidebar.hasAttribute("aria-hidden"), false);
+            assert.equal(mediaListeners.length, 1);
+
+            media.matches = true;
+            mediaListeners[0]({ matches: true });
+            assert.equal(sidebar.getAttribute("aria-hidden"), "true");
+
+            toggle.listeners.get("click")();
+            assert.equal(sidebar.hasAttribute("data-open"), true);
+            assert.equal(sidebar.getAttribute("aria-hidden"), "false");
+            assert.equal(toggle.getAttribute("aria-expanded"), "true");
+            assert.equal(closeButton.focused, true);
+
+            documentListeners.get("keydown")({ key: "Escape" });
+            assert.equal(sidebar.hasAttribute("data-open"), false);
+            assert.equal(sidebar.getAttribute("aria-hidden"), "true");
+            assert.equal(toggle.getAttribute("aria-expanded"), "false");
+            assert.equal(toggle.focused, true);
+
+            toggle.listeners.get("click")();
+            assert.equal(closeButton.focused, true);
+            media.matches = false;
+            mediaListeners[0]({ matches: false });
+            assert.equal(sidebar.hasAttribute("aria-hidden"), false);
+            assert.equal(sidebar.hasAttribute("data-open"), false);
+            assert.equal(toggle.getAttribute("aria-expanded"), "false");
+            assert.equal(navLink.focused, true);
+
+            process.stdout.write("mobile-navigation-ok");
+            """;
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo("node")
+            {
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+            },
+        };
+        process.StartInfo.ArgumentList.Add("--input-type=module");
+        process.StartInfo.ArgumentList.Add("--eval");
+        process.StartInfo.ArgumentList.Add(harness);
+        process.StartInfo.Environment["WEBPASS_SITE_SCRIPT_BASE64"] =
+            Convert.ToBase64String(Encoding.UTF8.GetBytes(script));
+
+        Assert.True(process.Start());
+        var standardOutput = process.StandardOutput.ReadToEndAsync();
+        var standardError = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        var output = await standardOutput;
+        var error = await standardError;
+
+        Assert.True(
+            process.ExitCode == 0,
+            $"Node mobile navigation behavior test failed:{Environment.NewLine}{error}");
+        Assert.Equal("mobile-navigation-ok", output);
+    }
 }

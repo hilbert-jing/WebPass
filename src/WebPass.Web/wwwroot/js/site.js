@@ -1,6 +1,7 @@
 (() => {
     const focusable = "a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex='-1'])";
     const drawerOpeners = new WeakMap();
+    const mobileNavigation = window.matchMedia?.("(max-width: 767px)") ?? null;
 
     function getDrawer(id) {
         if (!id) return null;
@@ -89,6 +90,36 @@
             openDrawer(sidebar.id, button);
         });
     });
+
+    function syncMobileNavigation() {
+        document.querySelectorAll("[data-nav-toggle]").forEach(button => {
+            const sidebar = document.getElementById(
+                button.getAttribute("aria-controls"));
+            if (!sidebar) return;
+
+            if (!mobileNavigation?.matches) {
+                const shouldMoveFocus = sidebar.hasAttribute("data-open") &&
+                    sidebar.contains(document.activeElement);
+                sidebar.removeAttribute("data-open");
+                sidebar.removeAttribute("aria-hidden");
+                button.setAttribute("aria-expanded", "false");
+                if (shouldMoveFocus) {
+                    const firstNavigationLink =
+                        sidebar.querySelector(".primary-nav a");
+                    (firstNavigationLink ??
+                        document.getElementById("main-content"))?.focus();
+                }
+                return;
+            }
+
+            const isOpen = sidebar.hasAttribute("data-open");
+            sidebar.setAttribute("aria-hidden", isOpen ? "false" : "true");
+            button.setAttribute("aria-expanded", isOpen ? "true" : "false");
+        });
+    }
+
+    syncMobileNavigation();
+    mobileNavigation?.addEventListener("change", syncMobileNavigation);
 
     document.addEventListener("click", event => {
         const target = event.target instanceof Element ? event.target : null;

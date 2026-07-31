@@ -183,7 +183,6 @@ label {
 
 .app-shell {
     display: grid;
-    grid-template-columns: 228px minmax(0, 1fr);
     min-height: 100vh;
 }
 
@@ -525,7 +524,9 @@ table tbody tr:last-child td {
     z-index: 100;
     inset: 0 0 0 auto;
     width: min(420px, 100%);
+    max-height: 100dvh;
     overflow-y: auto;
+    overscroll-behavior: contain;
     border-left: 1px solid var(--color-line);
     background: var(--color-canvas);
     box-shadow: var(--shadow-panel);
@@ -628,7 +629,13 @@ table tbody tr:last-child td {
     padding: 40px clamp(20px, 6vw, 72px);
 }
 
-@media (max-width: 1279px) and (min-width: 768px) {
+@media (min-width: 1280px) {
+    .app-shell {
+        grid-template-columns: 232px minmax(0, 1fr);
+    }
+}
+
+@media (min-width: 768px) and (max-width: 1279px) {
     .app-shell {
         grid-template-columns: 72px minmax(0, 1fr);
     }
@@ -696,7 +703,10 @@ table tbody tr:last-child td {
     .app-sidebar {
         position: fixed;
         inset: 0 auto 0 0;
-        width: min(300px, calc(100% - 44px));
+        width: min(88vw, 320px);
+        max-height: 100dvh;
+        overflow-y: auto;
+        overscroll-behavior: contain;
         box-shadow: var(--shadow-panel);
         transform: translateX(-102%);
         transition: transform var(--motion-panel) ease;
@@ -741,10 +751,22 @@ table tbody tr:last-child td {
         flex-basis: 100%;
     }
 
+    .form-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .data-table-wrap {
+        max-width: 100%;
+        overflow-x: auto;
+        overscroll-behavior-inline: contain;
+        scroll-padding-inline: 4px;
+    }
+
     .data-table,
     table {
         display: block;
         overflow-x: auto;
+        scroll-padding-inline: 4px;
         white-space: nowrap;
     }
 
