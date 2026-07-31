@@ -5,6 +5,8 @@ namespace WebPass.IntegrationTests.Presentation;
 
 public sealed class SecretRevealDomTests
 {
+    private static readonly TimeSpan HarnessTimeout = TimeSpan.FromSeconds(15);
+
     [Fact]
     public async Task Reveal_script_enforces_sensitive_value_lifecycle_in_an_executable_dom()
     {
@@ -61,7 +63,23 @@ public sealed class SecretRevealDomTests
         process.Start();
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
+        using var timeout = new CancellationTokenSource(HarnessTimeout);
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync();
+            }
+            return new(
+                -1,
+                await output,
+                $"Node harness timed out after {HarnessTimeout.TotalSeconds:0} seconds.{Environment.NewLine}{await error}");
+        }
         return new(
             process.ExitCode,
             await output,

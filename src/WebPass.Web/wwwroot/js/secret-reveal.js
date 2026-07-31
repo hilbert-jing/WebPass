@@ -85,6 +85,9 @@
                     body,
                     signal: controller.signal
                 });
+            if (controller.signal.aborted || activeController !== controller) {
+                return;
+            }
             if (response.status === 403) {
                 window.location.assign("/secrets/reauthenticate?returnUrl=%2Fservers");
                 return;

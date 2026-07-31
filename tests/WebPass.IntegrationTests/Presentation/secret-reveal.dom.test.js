@@ -430,14 +430,77 @@ async function testForbiddenRedirectKeepsPostContract() {
     assert.equal(env.primary.panel.hidden, true);
 }
 
+async function testRepeatedRevealIgnoresStaleForbiddenResponse() {
+    const env = createEnvironment();
+    const stale = deferredResponse();
+    env.queueDeferred(stale);
+    env.click(env.primary.reveal);
+
+    env.queueResponse(200, "current-password");
+    env.click(env.primary.reveal);
+    await flushAsyncWork();
+    stale.resolve(403);
+    await flushAsyncWork();
+
+    assert.deepEqual(env.redirects, []);
+    assert.equal(env.primary.value.textContent, "current-password");
+    assert.equal(env.primary.panel.hidden, false);
+}
+
+async function testHiddenIgnoresStaleForbiddenResponse() {
+    const env = createEnvironment();
+    const stale = deferredResponse();
+    env.queueDeferred(stale);
+    env.click(env.primary.reveal);
+
+    env.hideDocument();
+    stale.resolve(403);
+    await flushAsyncWork();
+
+    assert.deepEqual(env.redirects, []);
+    assert.equal(env.primary.value.textContent, "");
+    assert.equal(env.primary.panel.hidden, true);
+}
+
+async function testPagehideIgnoresStaleForbiddenResponse() {
+    const env = createEnvironment();
+    const stale = deferredResponse();
+    env.queueDeferred(stale);
+    env.click(env.primary.reveal);
+
+    env.pagehide();
+    stale.resolve(403);
+    await flushAsyncWork();
+
+    assert.deepEqual(env.redirects, []);
+    assert.equal(env.primary.value.textContent, "");
+    assert.equal(env.primary.panel.hidden, true);
+}
+
 async function main() {
-    await testRequestContractAndPlaintextDestination();
-    await testThirtySecondExpiry();
-    await testRepeatedRevealClearsAndRejectsLateResponse();
-    await testHiddenClearsAndRejectsLateResponse();
-    await testPagehideClearsAndRejectsLateResponse();
-    await testCopyUsesSamePanelWithoutExtendingExpiry();
-    await testForbiddenRedirectKeepsPostContract();
+    const tests = [
+        testRequestContractAndPlaintextDestination,
+        testThirtySecondExpiry,
+        testRepeatedRevealClearsAndRejectsLateResponse,
+        testHiddenClearsAndRejectsLateResponse,
+        testPagehideClearsAndRejectsLateResponse,
+        testCopyUsesSamePanelWithoutExtendingExpiry,
+        testForbiddenRedirectKeepsPostContract,
+        testRepeatedRevealIgnoresStaleForbiddenResponse,
+        testHiddenIgnoresStaleForbiddenResponse,
+        testPagehideIgnoresStaleForbiddenResponse,
+    ];
+    const failures = [];
+    for (const test of tests) {
+        try {
+            await test();
+        } catch (error) {
+            failures.push(`${test.name}: ${error.stack ?? error}`);
+        }
+    }
+    if (failures.length > 0) {
+        throw new Error(failures.join("\n\n"));
+    }
     process.stdout.write("secret-reveal DOM tests passed\n");
 }
 
