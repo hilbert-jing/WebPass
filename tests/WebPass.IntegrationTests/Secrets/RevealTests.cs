@@ -99,6 +99,13 @@ public sealed class RevealTests
 
         Assert.Contains($"data-asset-id=\"{factory.AssetId}\"", html, StringComparison.Ordinal);
         Assert.Contains("data-secret-reveal", html, StringComparison.Ordinal);
+        Assert.Contains($"id=\"secret-{factory.AssetId}\"", html, StringComparison.Ordinal);
+        Assert.Contains("data-secret-panel", html, StringComparison.Ordinal);
+        Assert.Contains("data-secret-value", html, StringComparison.Ordinal);
+        Assert.Contains("data-secret-countdown", html, StringComparison.Ordinal);
+        Assert.Contains("data-secret-status", html, StringComparison.Ordinal);
+        Assert.Contains("data-secret-copy", html, StringComparison.Ordinal);
+        Assert.Contains("服务器密码将在 30 秒后自动隐藏", html, StringComparison.Ordinal);
         Assert.Contains("/js/secret-reveal.js", html, StringComparison.Ordinal);
         Assert.DoesNotContain("server-password", html, StringComparison.Ordinal);
     }
@@ -109,6 +116,9 @@ public sealed class RevealTests
         using var factory = new RevealFactory();
         factory.InitializeData();
         using var client = factory.CreateAuthenticatedClient();
+
+        var html = await client.GetStringAsync("/secrets/reauthenticate");
+        Assert.Contains("验证当前密码", html, StringComparison.Ordinal);
 
         var responses = new List<HttpResponseMessage>();
         for (var attempt = 0; attempt < 6; attempt++)

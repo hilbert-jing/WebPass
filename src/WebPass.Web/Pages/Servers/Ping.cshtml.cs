@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using WebPass.Web.Application.Authorization;
 using WebPass.Web.Application.Ping;
 using WebPass.Web.Infrastructure.Security;
+using WebPass.Web.Presentation;
 
 namespace WebPass.Web.Pages.Servers;
 
@@ -13,21 +14,18 @@ namespace WebPass.Web.Pages.Servers;
 [EnableRateLimiting(SecretRateLimitPolicies.Ping)]
 public sealed class PingModel(PingService pingService) : PageModel
 {
-    public async Task<IActionResult> OnPostAsync(Guid id, CancellationToken ct)
-    {
-        try
-        {
-            var result = await pingService.ExecuteAsync(id, Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!), ct);
-            TempData["PingResult"] = $"{result.Outcome}; latency: {(result.LatencyMilliseconds is null ? "n/a" : result.LatencyMilliseconds + " ms")}; executed: {result.ExecutedAt:O}";
-            return RedirectToPage("/Servers/Index");
-        }
-        catch (UnauthorizedAccessException) { return Forbid(); }
-        catch (InvalidOperationException exception)
-        {
-            if (exception.Message.Contains("rate limit", StringComparison.OrdinalIgnoreCase))
-                return new ObjectResult("Ping rate limit exceeded.") { StatusCode = StatusCodes.Status429TooManyRequests };
-            return BadRequest(exception.Message);
-        }
-        catch (KeyNotFoundException exception) { return NotFound(exception.Message); }
-    }
+    public IActionResult OnGet() => StatusCode(
+        StatusCodes.Status405MethodNotAllowed);
+
+    public Task<IActionResult> OnPostAsync(Guid id, CancellationToken ct) =>
+        PingCommandWorkflow.ExecuteAsync(
+            pingService,
+            id,
+            Guid.Parse(
+                User.FindFirstValue(ClaimTypes.NameIdentifier)!),
+            TempData,
+            feedback => RedirectToPage(
+                "/Servers/Index",
+                PingCommandWorkflow.TargetRouteValues(feedback)),
+            ct);
 }

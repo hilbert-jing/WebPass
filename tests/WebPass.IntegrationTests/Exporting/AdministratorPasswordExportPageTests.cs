@@ -65,9 +65,29 @@ public sealed class AdministratorPasswordExportPageTests
         var token = AntiforgeryToken(html);
 
         Assert.Contains(
-            "plaintext server passwords",
+            "导出服务器密码",
             html,
-            StringComparison.OrdinalIgnoreCase);
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "文件包含明文服务器密码",
+            html,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "class=\"risk-callout",
+            html,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "固定格式",
+            html,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "XLSX",
+            html,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "确认并导出密码",
+            html,
+            StringComparison.Ordinal);
         Assert.DoesNotContain(
             "name=\"Format\"",
             html,
@@ -89,6 +109,36 @@ public sealed class AdministratorPasswordExportPageTests
             "ReturnUrl=",
             response.Headers.Location.OriginalString,
             StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Invalid_password_export_parameters_show_generic_chinese_error()
+    {
+        using var factory = new PasswordExportPageFactory();
+        factory.InitializeData();
+        using var client = factory.CreateAuthenticatedClient(
+            factory.AdministratorId);
+        var html = await client.GetStringAsync("/admin/password-export");
+        var token = AntiforgeryToken(html);
+
+        using var response = await client.PostAsync(
+            "/admin/password-export?handler=Download",
+            new FormUrlEncodedContent(
+            [
+                new("__RequestVerificationToken", token),
+                new("Query.Status", "invalid-status"),
+            ]));
+        var responseHtml = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains(
+            "无法导出服务器密码：请检查筛选条件。",
+            responseHtml,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "invalid-status",
+            responseHtml,
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -131,6 +181,96 @@ public sealed class AdministratorPasswordExportPageTests
         Assert.Equal(
             "server-password",
             workbook.Worksheet(1).Cell(2, 9).GetString());
+    }
+
+    [Fact]
+    public async Task Successful_reauthentication_redirects_to_the_local_destination_with_one_time_five_minute_status()
+    {
+        using var factory = new PasswordExportPageFactory();
+        factory.InitializeData();
+        using var client = factory.CreateAuthenticatedClient(
+            factory.AdministratorId);
+        var token = AntiforgeryToken(
+            await client.GetStringAsync("/secrets/reauthenticate"));
+
+        using var response = await client.PostAsync(
+            "/secrets/reauthenticate",
+            new FormUrlEncodedContent(
+            [
+                new("Input.Password", "current-password"),
+                new("__RequestVerificationToken", token),
+                new("ReturnUrl", "/admin/password-export"),
+            ]));
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Equal(
+            "/admin/password-export",
+            response.Headers.Location!.OriginalString);
+
+        using var successResponse = await client.GetAsync(
+            response.Headers.Location);
+        var successHtml = WebUtility.HtmlDecode(
+            await successResponse.Content.ReadAsStringAsync());
+        Assert.Contains(
+            "验证已通过，接下来的 5 分钟内可执行敏感操作。",
+            successHtml,
+            StringComparison.Ordinal);
+        Assert.Contains("导出服务器密码", successHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "value=\"current-password\"",
+            successHtml,
+            StringComparison.Ordinal);
+
+        var refreshedHtml = WebUtility.HtmlDecode(
+            await client.GetStringAsync("/admin/password-export"));
+        Assert.DoesNotContain(
+            "验证已通过，接下来的 5 分钟内可执行敏感操作。",
+            refreshedHtml,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Reauthentication_rejects_external_return_url_and_redirects_to_the_local_inventory_fallback()
+    {
+        const string externalMarker = "external-return-secret-bc921e";
+        using var factory = new PasswordExportPageFactory();
+        factory.InitializeData();
+        using var client = factory.CreateAuthenticatedClient(
+            factory.AdministratorId);
+        var token = AntiforgeryToken(
+            await client.GetStringAsync("/secrets/reauthenticate"));
+
+        using var response = await client.PostAsync(
+            "/secrets/reauthenticate",
+            new FormUrlEncodedContent(
+            [
+                new("Input.Password", "current-password"),
+                new("__RequestVerificationToken", token),
+                new(
+                    "ReturnUrl",
+                    $"https://attacker.example/collect?value={externalMarker}"),
+            ]));
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Equal("/servers", response.Headers.Location!.OriginalString);
+        Assert.DoesNotContain(
+            "attacker.example",
+            response.Headers.Location.OriginalString,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(
+            externalMarker,
+            response.Headers.Location.OriginalString,
+            StringComparison.Ordinal);
+
+        var html = WebUtility.HtmlDecode(
+            await client.GetStringAsync(response.Headers.Location));
+        Assert.Contains(
+            "验证已通过，接下来的 5 分钟内可执行敏感操作。",
+            html,
+            StringComparison.Ordinal);
+        Assert.Contains("服务器资产", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("attacker.example", html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(externalMarker, html, StringComparison.Ordinal);
     }
 
     private static string AntiforgeryToken(string html)

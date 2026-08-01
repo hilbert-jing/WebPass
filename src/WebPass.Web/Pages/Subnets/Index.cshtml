@@ -1,54 +1,176 @@
 @page "/subnets"
 @model WebPass.Web.Pages.Subnets.IndexModel
 @{
-    ViewData["Title"] = "Subnets";
+    ViewData["Title"] = "网段管理";
+    var openCreation = Request.Method == "POST" &&
+        string.Equals(Request.Query["handler"], "Create", StringComparison.OrdinalIgnoreCase);
 }
 
-<h1>Subnets</h1>
-<div asp-validation-summary="ModelOnly"></div>
+<header class="page-header">
+    <div>
+        <h1>网段管理</h1>
+        <p>维护服务器可用的网络范围、位置和启用状态，并在保存前核对 CIDR 地址范围。</p>
+    </div>
+    <button type="button"
+            data-js-only
+            data-drawer-open="create-subnet"
+            aria-controls="create-subnet"
+            aria-expanded="@openCreation.ToString().ToLowerInvariant()">
+        添加网段
+    </button>
+</header>
 
-<form method="post" asp-page-handler="Create">
-    <label asp-for="Input.Name"></label><input asp-for="Input.Name" />
-    <label asp-for="Input.Cidr"></label><input asp-for="Input.Cidr" />
-    <label asp-for="Input.Location"></label><input asp-for="Input.Location" />
-    <label asp-for="Input.Notes"></label><textarea asp-for="Input.Notes"></textarea>
-    <label asp-for="Input.IsEnabled"></label><input asp-for="Input.IsEnabled" />
-    <button type="submit" formaction="?handler=Preview">Preview range</button>
-    <button type="submit">Create subnet</button>
-</form>
+<div asp-validation-summary="ModelOnly" class="alert-region"></div>
 
-<table>
-    <thead><tr><th>Name</th><th>CIDR</th><th>Location</th><th>Enabled</th><th>Actions</th></tr></thead>
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>名称</th>
+            <th>CIDR</th>
+            <th>位置</th>
+            <th>状态</th>
+            <th>操作</th>
+        </tr>
+    </thead>
     <tbody>
     @foreach (var subnet in Model.Subnets)
     {
         <tr>
-            <td>@subnet.Name</td><td>@subnet.Cidr</td><td>@subnet.Location</td><td>@subnet.IsEnabled</td>
+            <td>@subnet.Name</td>
+            <td class="data-value">@subnet.Cidr</td>
+            <td>@subnet.Location</td>
             <td>
-                <form method="post" asp-page-handler="Edit">
-                    <input type="hidden" name="id" value="@subnet.Id" />
-                    <input type="hidden" name="rowVersion" value="@Convert.ToBase64String(subnet.RowVersion)" />
-                    <label>Name <input name="Input.Name" value="@subnet.Name" /></label>
-                    <label>CIDR <input name="Input.Cidr" value="@subnet.Cidr" /></label>
-                    <label>Location <input name="Input.Location" value="@subnet.Location" /></label>
-                    <label>Notes <input name="Input.Notes" value="@subnet.Notes" /></label>
-                    <input type="hidden" name="Input.IsEnabled" value="false" />
-                    <label>Enabled <input type="checkbox" name="Input.IsEnabled" value="true" checked="@subnet.IsEnabled" /></label>
-                    <button type="submit">Save edit</button>
-                </form>
-                <form method="post" asp-page-handler="SetEnabled">
-                    <input type="hidden" name="id" value="@subnet.Id" />
-                    <input type="hidden" name="rowVersion" value="@Convert.ToBase64String(subnet.RowVersion)" />
-                    <input type="hidden" name="isEnabled" value="@(!subnet.IsEnabled)" />
-                    <button type="submit">@(subnet.IsEnabled ? "Disable" : "Enable")</button>
-                </form>
-                <form method="post" asp-page-handler="Delete">
-                    <input type="hidden" name="id" value="@subnet.Id" />
-                    <input type="hidden" name="rowVersion" value="@Convert.ToBase64String(subnet.RowVersion)" />
-                    <button type="submit">Delete</button>
-                </form>
+                <span class="status-badge" data-status="@(subnet.IsEnabled ? "success" : "warning")">
+                    @(subnet.IsEnabled ? "已启用" : "已停用")
+                </span>
+            </td>
+            <td>
+                <details data-subnet-edit>
+                    <summary>编辑</summary>
+                    <form method="post" asp-page-handler="Edit">
+                        <input type="hidden" name="id" value="@subnet.Id" />
+                        <input type="hidden" name="rowVersion" value="@Convert.ToBase64String(subnet.RowVersion)" />
+                        <div>
+                            <label for="subnet-name-@subnet.Id">名称</label>
+                            <input id="subnet-name-@subnet.Id" name="Input.Name" value="@subnet.Name" required />
+                        </div>
+                        <div>
+                            <label for="subnet-cidr-@subnet.Id">CIDR</label>
+                            <input id="subnet-cidr-@subnet.Id" name="Input.Cidr" value="@subnet.Cidr" required />
+                        </div>
+                        <div>
+                            <label for="subnet-location-@subnet.Id">位置</label>
+                            <input id="subnet-location-@subnet.Id" name="Input.Location" value="@subnet.Location" required />
+                        </div>
+                        <div>
+                            <label for="subnet-notes-@subnet.Id">备注</label>
+                            <textarea id="subnet-notes-@subnet.Id" name="Input.Notes">@subnet.Notes</textarea>
+                        </div>
+                        <div>
+                            <input id="subnet-enabled-@subnet.Id"
+                                   type="checkbox"
+                                   name="Input.IsEnabled"
+                                   value="true"
+                                   checked="@subnet.IsEnabled" />
+                            <label for="subnet-enabled-@subnet.Id">启用此网段</label>
+                        </div>
+                        <input type="hidden" name="Input.IsEnabled" value="false" />
+                        <button type="submit" data-submit-label="正在保存">保存修改</button>
+                    </form>
+                </details>
+
+                <details>
+                    <summary>@(subnet.IsEnabled ? "停用" : "启用")</summary>
+                    <p>
+                        @(subnet.IsEnabled
+                            ? "停用后，新服务器不能再登记到此网段。"
+                            : "启用后，可继续将新服务器登记到此网段。")
+                    </p>
+                    <form method="post" asp-page-handler="SetEnabled">
+                        <input type="hidden" name="id" value="@subnet.Id" />
+                        <input type="hidden" name="rowVersion" value="@Convert.ToBase64String(subnet.RowVersion)" />
+                        <input type="hidden" name="isEnabled" value="@(!subnet.IsEnabled)" />
+                        <button type="submit"
+                                data-submit-label="正在更新">
+                            确认@(subnet.IsEnabled ? "停用" : "启用")
+                        </button>
+                    </form>
+                </details>
+
+                <details>
+                    <summary>删除</summary>
+                    <p>删除“@subnet.Name”（@subnet.Cidr）后无法恢复。</p>
+                    <form method="post" asp-page-handler="Delete">
+                        <input type="hidden" name="id" value="@subnet.Id" />
+                        <input type="hidden" name="rowVersion" value="@Convert.ToBase64String(subnet.RowVersion)" />
+                        <button type="submit" data-submit-label="正在删除">确认删除</button>
+                    </form>
+                </details>
             </td>
         </tr>
     }
     </tbody>
 </table>
+
+<aside id="create-subnet"
+       class="drawer"
+       data-drawer="create-subnet"
+       @Html.Raw(openCreation ? "data-open" : string.Empty)
+       aria-labelledby="create-subnet-title">
+    <header class="page-header">
+        <div>
+            <h2 id="create-subnet-title">添加网段</h2>
+            <p>填写 CIDR 后可先预览网络边界，再保存网段。</p>
+        </div>
+        <button type="button" data-js-only data-drawer-close aria-label="关闭添加网段面板">关闭</button>
+    </header>
+
+    <form method="post"
+          asp-page-handler="Create"
+          data-subnet-preview-form>
+        <div>
+            <label asp-for="Input.Name">网段名称</label>
+            <input asp-for="Input.Name" data-drawer-initial-focus />
+            <span asp-validation-for="Input.Name"></span>
+        </div>
+        <div>
+            <label asp-for="Input.Cidr">CIDR</label>
+            <input asp-for="Input.Cidr" placeholder="例如 10.20.30.0/24" />
+            <span asp-validation-for="Input.Cidr"></span>
+        </div>
+        <div>
+            <label asp-for="Input.Location">位置</label>
+            <input asp-for="Input.Location" />
+            <span asp-validation-for="Input.Location"></span>
+        </div>
+        <div>
+            <label asp-for="Input.Notes">备注</label>
+            <textarea asp-for="Input.Notes"></textarea>
+        </div>
+        <div>
+            <input asp-for="Input.IsEnabled" />
+            <label asp-for="Input.IsEnabled">创建后立即启用</label>
+        </div>
+
+        <button type="button"
+                data-js-only
+                data-subnet-preview
+                aria-controls="subnet-preview-result">
+            预览 CIDR
+        </button>
+        <noscript>
+            <p>浏览器未启用脚本；提交预览后将在响应页显示 CIDR 结果。</p>
+            <button type="submit" formaction="?handler=Preview">提交预览</button>
+        </noscript>
+        <button type="submit" data-submit-label="正在创建">创建网段</button>
+
+        <section id="subnet-preview-result"
+                 data-subnet-preview-result
+                 role="status"
+                 aria-live="polite">
+            输入 CIDR 后可在此查看地址范围。
+        </section>
+    </form>
+</aside>
+
+<script src="/js/subnet-preview.js"></script>

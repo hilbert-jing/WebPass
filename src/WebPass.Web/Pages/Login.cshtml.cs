@@ -35,7 +35,7 @@ public sealed class LoginModel(LoginService loginService) : PageModel
         var result = await loginService.LoginAsync(Input.Username, Input.Password, sourceIp, ct);
         if (result.Kind != LoginResultKind.Success || result.UserId is not { } userId)
         {
-            ModelState.AddModelError(string.Empty, "Invalid username or password.");
+            ModelState.AddModelError(string.Empty, "用户名或密码不正确。");
             return Page();
         }
 
@@ -56,10 +56,10 @@ public sealed class LoginModel(LoginService loginService) : PageModel
 
     public sealed class LoginInput
     {
-        [Required]
+        [Required(ErrorMessage = "请输入用户名。")]
         public string Username { get; set; } = string.Empty;
 
-        [Required]
+        [Required(ErrorMessage = "请输入密码。")]
         [DataType(DataType.Password)]
         public string Password { get; set; } = string.Empty;
     }

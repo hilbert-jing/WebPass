@@ -96,6 +96,25 @@ builder.Services
         options.Events.OnRedirectToAccessDenied = context =>
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            var path = context.Request.Path.Value;
+            var isDirectPing = path is not null &&
+                path.StartsWith("/servers/", StringComparison.OrdinalIgnoreCase) &&
+                path.EndsWith("/ping", StringComparison.OrdinalIgnoreCase);
+            var isInventoryPing =
+                string.Equals(
+                    path,
+                    "/servers",
+                    StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(
+                    context.Request.Query["handler"].ToString(),
+                    "Ping",
+                    StringComparison.OrdinalIgnoreCase);
+            if (isDirectPing || isInventoryPing)
+            {
+                return context.Response.WriteAsync(
+                    "没有权限执行 Ping。");
+            }
+
             return Task.CompletedTask;
         };
     });

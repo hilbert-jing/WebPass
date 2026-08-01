@@ -2,7 +2,9 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.AspNetCore.Mvc.ViewFeatures;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using WebPass.Web.Application.Authorization;
 using WebPass.Web.Data;
 using WebPass.Web.Domain.Entities;
@@ -49,6 +51,21 @@ public sealed class AdminUsersTests
             created.PasswordHash,
             audit.Details ?? string.Empty,
             StringComparison.Ordinal);
+        Assert.Equal(
+            "已创建用户。",
+            model.TempData["StatusMessage"]);
+        Assert.DoesNotContain(
+            created.Username,
+            model.TempData["StatusMessage"]?.ToString(),
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "abc123",
+            model.TempData["StatusMessage"]?.ToString(),
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            created.PasswordHash,
+            model.TempData["StatusMessage"]?.ToString(),
+            StringComparison.Ordinal);
     }
 
     [Theory]
@@ -66,6 +83,9 @@ public sealed class AdminUsersTests
         var result = await model.OnPostCreateAsync(username, default);
 
         Assert.IsType<PageResult>(result);
+        Assert.Equal(
+            "请输入用户名。",
+            Assert.Single(model.ModelState["username"]!.Errors).ErrorMessage);
         Assert.Single(await db.Users.ToListAsync());
         Assert.Empty(await db.AuditLogs.ToListAsync());
     }
@@ -84,6 +104,9 @@ public sealed class AdminUsersTests
             default);
 
         Assert.IsType<PageResult>(result);
+        Assert.Equal(
+            "用户名不能超过 128 个字符。",
+            Assert.Single(model.ModelState["username"]!.Errors).ErrorMessage);
         Assert.Single(await db.Users.ToListAsync());
         Assert.Empty(await db.AuditLogs.ToListAsync());
     }
@@ -101,6 +124,9 @@ public sealed class AdminUsersTests
         var result = await model.OnPostCreateAsync(" operator ", default);
 
         Assert.IsType<PageResult>(result);
+        Assert.Equal(
+            "该用户名已存在，请使用其他用户名。",
+            Assert.Single(model.ModelState["username"]!.Errors).ErrorMessage);
         Assert.Equal(2, await db.Users.CountAsync());
         Assert.Empty(await db.AuditLogs.ToListAsync());
     }
@@ -173,6 +199,21 @@ public sealed class AdminUsersTests
         Assert.DoesNotContain(
             reset.PasswordHash,
             audit.Details ?? string.Empty,
+            StringComparison.Ordinal);
+        Assert.Equal(
+            "用户密码已重置为系统预设初始密码。",
+            model.TempData["StatusMessage"]);
+        Assert.DoesNotContain(
+            reset.Username,
+            model.TempData["StatusMessage"]?.ToString(),
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "abc123",
+            model.TempData["StatusMessage"]?.ToString(),
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            reset.PasswordHash,
+            model.TempData["StatusMessage"]?.ToString(),
             StringComparison.Ordinal);
     }
 
@@ -264,6 +305,13 @@ public sealed class AdminUsersTests
         Assert.Contains("afterPermissions", audit.Details);
         Assert.DoesNotContain("PasswordHash", audit.Details, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("opaque-password-hash", audit.Details, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(
+            "已更新用户权限。",
+            model.TempData["StatusMessage"]);
+        Assert.DoesNotContain(
+            operatorUser.Username,
+            model.TempData["StatusMessage"]?.ToString(),
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -320,6 +368,13 @@ public sealed class AdminUsersTests
         Assert.Contains("beforeEnabled", audit.Details);
         Assert.Contains("afterEnabled", audit.Details);
         Assert.DoesNotContain("PasswordHash", audit.Details, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(
+            "已禁用用户。",
+            model.TempData["StatusMessage"]);
+        Assert.DoesNotContain(
+            operatorUser.Username,
+            model.TempData["StatusMessage"]?.ToString(),
+            StringComparison.Ordinal);
     }
 
     private static UsersModel NewModel(WebPassDbContext db, Guid administratorId)
@@ -329,7 +384,18 @@ public sealed class AdminUsersTests
             new PermissionAuthorizationHandler(db),
             new AuditWriter(db),
             new Argon2PasswordHasher());
-        model.PageContext = new PageContext { HttpContext = new DefaultHttpContext() };
+        var httpContext = new DefaultHttpContext();
+        var tempData = new TempDataDictionary(
+            httpContext,
+            new InMemoryTempDataProvider());
+        httpContext.RequestServices = new ServiceCollection()
+            .AddSingleton<ITempDataDictionaryFactory>(
+                new InMemoryTempDataDictionaryFactory(tempData))
+            .BuildServiceProvider();
+        model.PageContext = new PageContext
+        {
+            HttpContext = httpContext,
+        };
         model.HttpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim(ClaimTypes.NameIdentifier, administratorId.ToString())], "test"));
         return model;
@@ -344,4 +410,23 @@ public sealed class AdminUsersTests
         PasswordHash = "opaque-password-hash",
         IsAdministrator = isAdministrator,
     };
+
+    private sealed class InMemoryTempDataProvider : ITempDataProvider
+    {
+        public IDictionary<string, object> LoadTempData(
+            HttpContext context) => new Dictionary<string, object>();
+
+        public void SaveTempData(
+            HttpContext context,
+            IDictionary<string, object> values)
+        {
+        }
+    }
+
+    private sealed class InMemoryTempDataDictionaryFactory(
+        ITempDataDictionary tempData) : ITempDataDictionaryFactory
+    {
+        public ITempDataDictionary GetTempData(
+            HttpContext context) => tempData;
+    }
 }

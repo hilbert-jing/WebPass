@@ -28,7 +28,7 @@ public sealed class IndexModel(SubnetService subnetService) : PageModel
         }
         catch (Exception exception) when (exception is ArgumentException or UnauthorizedAccessException)
         {
-            return BadRequest(new { error = exception.Message });
+            return BadRequest(new { error = UserFacingError(exception) });
         }
     }
 
@@ -47,7 +47,7 @@ public sealed class IndexModel(SubnetService subnetService) : PageModel
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or UnauthorizedAccessException)
         {
-            ModelState.AddModelError(string.Empty, exception.Message);
+            ModelState.AddModelError(string.Empty, UserFacingError(exception));
             await LoadAsync(ct);
             return Page();
         }
@@ -71,15 +71,28 @@ public sealed class IndexModel(SubnetService subnetService) : PageModel
         }
         catch (ArgumentException exception)
         {
-            return BadRequest(exception.Message);
+            return BadRequest(UserFacingError(exception));
         }
         catch (Exception exception) when (exception is InvalidOperationException or UnauthorizedAccessException)
         {
-            ModelState.AddModelError(string.Empty, exception.Message);
+            ModelState.AddModelError(string.Empty, UserFacingError(exception));
             await LoadAsync(ct);
             return Page();
         }
     }
+
+    private static string UserFacingError(Exception exception) => exception switch
+    {
+        InvalidOperationException { Message: "The subnet overlaps an existing subnet." } =>
+            "无法保存网段：该范围与现有网段重叠。",
+        InvalidOperationException { Message: "The subnet range cannot exclude an associated asset address." } =>
+            "无法缩小网段：已有服务器地址将落在新范围之外。",
+        InvalidOperationException { Message: "A subnet with associated assets can only be disabled." } =>
+            "无法删除网段：请先解除关联服务器，或停用该网段。",
+        ArgumentException =>
+            "网段信息无效，请检查 CIDR 和必填字段。",
+        _ => exception.Message,
+    };
 
     private async Task LoadAsync(CancellationToken ct) => Subnets = await subnetService.ListAsync(UserId(), ct);
     private Guid UserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
@@ -102,11 +115,11 @@ public sealed class IndexModel(SubnetService subnetService) : PageModel
 
     public sealed class SubnetForm
     {
-        [Required]
+        [Required(ErrorMessage = "请输入网段名称。")]
         public string Name { get; set; } = string.Empty;
-        [Required]
+        [Required(ErrorMessage = "请输入 CIDR。")]
         public string Cidr { get; set; } = string.Empty;
-        [Required]
+        [Required(ErrorMessage = "请输入位置。")]
         public string Location { get; set; } = string.Empty;
         public string? Notes { get; set; }
         public bool IsEnabled { get; set; } = true;

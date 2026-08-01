@@ -1,32 +1,61 @@
 @page "/exports"
+@using WebPass.Web.Domain.Enums
+@using WebPass.Web.Presentation
 @model WebPass.Web.Pages.Exports.IndexModel
 @{
-    ViewData["Title"] = "Export servers";
+    ViewData["Title"] = "导出服务器数据";
 }
 
-<h1>Export servers</h1>
-<p>Export active registered server inventory. Ordinary exports never contain passwords.</p>
-<div asp-validation-summary="ModelOnly"></div>
-<form method="post" asp-page-handler="Download">
-    <label asp-for="Query.Search"></label>
-    <input asp-for="Query.Search" />
+<header class="page-header">
+    <div>
+        <h1>导出服务器数据</h1>
+        <p>按当前筛选范围生成服务器资产清单，可下载为 CSV 或 XLSX。</p>
+    </div>
+</header>
 
-    <label asp-for="Query.SubnetId">Subnet ID</label>
-    <input asp-for="Query.SubnetId" />
+<section class="export-scope toast-region" aria-label="导出安全说明">
+    <strong>普通导出不包含服务器密码</strong>
+    <p>文件仅包含资产与运行状态信息，可按内部数据管理规范保存和共享。</p>
+    <p data-export-scope-summary>@Model.ScopeSummary</p>
+</section>
 
-    <label asp-for="Query.Status"></label>
-    <select asp-for="Query.Status">
-        <option value="">All</option>
-        <option value="Unknown">Unknown</option>
-        <option value="Alive">Alive</option>
-        <option value="Fault">Fault</option>
-    </select>
+@if (!ViewData.ModelState.IsValid)
+{
+    <p class="alert-region" role="alert">无法导出：请检查筛选条件和文件格式。</p>
+}
 
-    <label asp-for="Format"></label>
-    <select asp-for="Format">
-        <option value="Csv">CSV</option>
-        <option value="Xlsx">XLSX</option>
-    </select>
-
-    <button type="submit">Download export</button>
+<form method="post" asp-page-handler="Download" class="command-bar">
+    <div>
+        <label asp-for="Query.Search">搜索</label>
+        <input asp-for="Query.Search" placeholder="IP、位置、计算机或系统" />
+    </div>
+    <div>
+        <label asp-for="Query.SubnetId">网段 ID</label>
+        <input asp-for="Query.SubnetId" placeholder="全部网段" />
+    </div>
+    <div>
+        <label asp-for="Query.Status">状态</label>
+        <select asp-for="Query.Status">
+            <option value="">全部状态</option>
+            @foreach (var status in Enum.GetValues<AliveStatus>())
+            {
+                <option value="@status">@UiLabels.ForAliveStatus(status)</option>
+            }
+        </select>
+    </div>
+    <div role="group" aria-labelledby="export-format-label">
+        <span id="export-format-label">文件格式</span>
+        <button type="submit"
+                name="Format"
+                value="Csv"
+                data-export-submit>
+            下载 CSV
+        </button>
+        <button type="submit"
+                name="Format"
+                value="Xlsx"
+                data-export-submit>
+            下载 XLSX
+        </button>
+    </div>
 </form>

@@ -14,6 +14,18 @@ public static class SecretRateLimitPolicies
     public static void AddTo(RateLimiterOptions options)
     {
         options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+        options.OnRejected = static async (context, ct) =>
+        {
+            var path = context.HttpContext.Request.Path.Value;
+            if (path is not null &&
+                path.StartsWith("/servers/", StringComparison.OrdinalIgnoreCase) &&
+                path.EndsWith("/ping", StringComparison.OrdinalIgnoreCase))
+            {
+                await context.HttpContext.Response.WriteAsync(
+                    "Ping 操作过于频繁，请稍后重试。",
+                    ct);
+            }
+        };
         options.AddPolicy(Login, context =>
             FixedWindow(context, permitLimit: 5, useUserIdentity: false));
         options.AddPolicy(Reauthentication, context =>

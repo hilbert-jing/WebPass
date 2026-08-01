@@ -1,16 +1,82 @@
 @page "/audit"
+@using WebPass.Web.Presentation
 @model WebPass.Web.Pages.Audit.IndexModel
 @{
-    ViewData["Title"] = "Audit";
+    ViewData["Title"] = "审计日志";
 }
 
-<h1>Audit log</h1>
-<table>
-    <thead><tr><th>When</th><th>Actor</th><th>Action</th><th>Object</th><th>Result</th><th>Correlation</th></tr></thead>
+<header class="page-header">
+    <div>
+        <h1>审计日志</h1>
+        <p>查看安全与管理操作的时间、主体和处理结果。</p>
+    </div>
+</header>
+
+<section class="toast-region" aria-label="审计日志使用说明">
+    <strong>只读记录</strong>
+    <p>审计日志为只读记录，不能在此修改或删除。</p>
+</section>
+
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>时间</th>
+            <th>操作人</th>
+            <th>动作</th>
+            <th>对象</th>
+            <th>结果</th>
+            <th>关联编号</th>
+        </tr>
+    </thead>
     <tbody>
-    @foreach (var entry in Model.Entries)
+    @if (Model.Entries.Count == 0)
     {
-        <tr><td>@entry.OccurredAt</td><td>@entry.ActorUserId</td><td>@entry.Action</td><td>@entry.ObjectType @entry.ObjectId</td><td>@entry.Result</td><td>@entry.CorrelationId</td></tr>
+        <tr>
+            <td colspan="6">尚无审计记录</td>
+        </tr>
+    }
+    else
+    {
+        @foreach (var entry in Model.Entries)
+        {
+            var correlationTarget = $"audit-correlation-{entry.Id:N}";
+            var correlationStatus = $"audit-correlation-status-{entry.Id:N}";
+            <tr>
+                <td class="data-value">@entry.OccurredAt.ToString("yyyy-MM-dd HH:mm:ss zzz")</td>
+                <td class="data-value">@(entry.ActorUserId?.ToString() ?? "系统")</td>
+                <td>@UiLabels.ForAuditAction(entry.Action)</td>
+                <td>
+                    @UiLabels.ForAuditObjectType(entry.ObjectType)
+                    @if (!string.IsNullOrWhiteSpace(entry.ObjectId))
+                    {
+                        <span class="data-value">@entry.ObjectId</span>
+                    }
+                </td>
+                <td>@UiLabels.ForAuditResult(entry.Result)</td>
+                <td>
+                    @if (string.IsNullOrWhiteSpace(entry.CorrelationId))
+                    {
+                        <span>无</span>
+                    }
+                    else
+                    {
+                        <span id="@correlationTarget" class="data-value">@entry.CorrelationId</span>
+                        <button type="button"
+                                data-copy
+                                data-copy-target="#@correlationTarget"
+                                data-copy-status-target="#@correlationStatus"
+                                aria-describedby="@correlationStatus"
+                                aria-label="复制关联编号">
+                            复制
+                        </button>
+                        <span id="@correlationStatus"
+                              role="status"
+                              aria-live="polite"
+                              aria-atomic="true"></span>
+                    }
+                </td>
+            </tr>
+        }
     }
     </tbody>
 </table>

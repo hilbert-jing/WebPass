@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.AspNetCore.Mvc.ViewFeatures;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -185,6 +186,10 @@ public sealed class AuthenticationSessionTests
                 },
             },
         };
+        var tempData = new TempDataDictionary(
+            model.HttpContext,
+            new DictionaryTempDataProvider());
+        model.TempData = tempData;
 
         Assert.Equal(
             StatusCodes.Status405MethodNotAllowed,
@@ -197,6 +202,7 @@ public sealed class AuthenticationSessionTests
         Assert.Equal(
             CookieAuthenticationDefaults.AuthenticationScheme,
             authentication.SignedOutScheme);
+        Assert.Equal("已安全退出。", tempData["StatusMessage"]);
         var audit = Assert.Single(db.AuditLogs);
         Assert.Equal("Logout", audit.Action);
         Assert.Null(audit.Details);
@@ -249,6 +255,18 @@ public sealed class AuthenticationSessionTests
         new(new DbContextOptionsBuilder<WebPassDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
             .Options);
+
+    private sealed class DictionaryTempDataProvider : ITempDataProvider
+    {
+        public IDictionary<string, object> LoadTempData(HttpContext context) =>
+            new Dictionary<string, object>();
+
+        public void SaveTempData(
+            HttpContext context,
+            IDictionary<string, object> values)
+        {
+        }
+    }
 
     private sealed class RecordingAuthenticationService
         : IAuthenticationService
