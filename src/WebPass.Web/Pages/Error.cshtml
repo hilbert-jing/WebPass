@@ -9,6 +9,20 @@
     <div class="auth-brand">WebPass</div>
     <h1 id="error-title">无法完成此请求</h1>
     <p>请稍后重试；如问题持续出现，请向管理员提供以下关联编号。</p>
-    <p class="correlation-id">关联编号：<code>@Model.CorrelationId</code></p>
+    <p class="correlation-id">
+        关联编号：<code id="error-correlation-id">@Model.CorrelationId</code>
+        <button type="button"
+                data-copy
+                data-copy-target="#error-correlation-id"
+                data-copy-status-target="#error-correlation-status"
+                aria-describedby="error-correlation-status"
+                aria-label="复制关联编号">
+            复制
+        </button>
+        <span id="error-correlation-status"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"></span>
+    </p>
     <a href="/servers">返回服务器资产</a>
 </section>

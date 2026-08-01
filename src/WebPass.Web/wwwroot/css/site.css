@@ -690,6 +690,31 @@ html[data-js-enabled] .drawer[data-open] {
         padding-inline: 8px;
     }
 
+    .nav-group a:hover .nav-label,
+    .nav-group a:focus-visible .nav-label {
+        position: absolute;
+        z-index: 40;
+        top: 50%;
+        inset-inline-start: calc(100% + 10px);
+        width: max-content;
+        max-width: min(240px, calc(100vw - 100px));
+        height: auto;
+        overflow: visible;
+        clip-path: none;
+        transform: translateY(-50%);
+        border: 1px solid color-mix(in srgb, var(--color-canvas) 18%, transparent);
+        border-radius: var(--radius-control);
+        background: var(--color-nav);
+        box-shadow: var(--shadow-panel);
+        color: var(--color-canvas);
+        padding: 7px 10px;
+        font-size: .8125rem;
+        font-weight: 600;
+        line-height: 1.35;
+        pointer-events: none;
+        white-space: nowrap;
+    }
+
     .sidebar-account {
         display: flex;
         flex-direction: column;

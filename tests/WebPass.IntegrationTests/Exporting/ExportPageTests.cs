@@ -27,6 +27,8 @@ public sealed class ExportPageTests
 {
     private const string UniqueServerPassword =
         "ordinary-export-secret-8f62f8a3";
+    private const string UniquePasswordHash =
+        "ordinary-export-hash-4c1a7b9e";
 
     [Fact]
     public async Task Export_page_renders_chinese_secret_free_scope()
@@ -46,7 +48,47 @@ public sealed class ExportPageTests
         Assert.Contains("存活", html, StringComparison.Ordinal);
         Assert.Contains("异常", html, StringComparison.Ordinal);
         Assert.Contains("停用", html, StringComparison.Ordinal);
-        Assert.Contains("下载导出文件", html, StringComparison.Ordinal);
+        Assert.Contains("下载 XLSX", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Selected_csv_and_filters_render_accurate_no_script_label_and_secret_free_scope_summary()
+    {
+        using var factory = new ExportPageFactory();
+        factory.InitializeData();
+        using var client = factory.CreateAuthenticatedClient();
+
+        var html = WebUtility.HtmlDecode(await client.GetStringAsync(
+            $"/exports?Format=Csv&Query.Search=ERP&Query.SubnetId={factory.SubnetId}&Query.Status=Alive"));
+        var submit = Regex.Match(
+            html,
+            "<button[^>]*data-export-submit[^>]*>.*?</button>",
+            RegexOptions.Singleline).Value;
+        var summary = Regex.Match(
+            html,
+            "<p[^>]*data-export-scope-summary[^>]*>.*?</p>",
+            RegexOptions.Singleline).Value;
+
+        Assert.Equal(
+            "下载 CSV",
+            Regex.Replace(
+                Regex.Match(
+                    submit,
+                    ">(?<label>.*?)</button>",
+                    RegexOptions.Singleline).Groups["label"].Value,
+                "\\s+",
+                " ").Trim());
+        Assert.Contains("搜索“ERP”", summary, StringComparison.Ordinal);
+        Assert.Contains(factory.SubnetId.ToString(), summary, StringComparison.Ordinal);
+        Assert.Contains("状态“存活”", summary, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            UniqueServerPassword,
+            summary,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            UniquePasswordHash,
+            summary,
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -171,6 +213,8 @@ public sealed class ExportPageTests
         private readonly string _databaseName = Guid.NewGuid().ToString("N");
         private readonly Guid _userId = Guid.NewGuid();
 
+        public Guid SubnetId { get; } = Guid.NewGuid();
+
         public void InitializeData()
         {
             using var scope = Services.CreateScope();
@@ -179,7 +223,7 @@ public sealed class ExportPageTests
             {
                 Id = _userId,
                 Username = "exporter",
-                PasswordHash = "unused",
+                PasswordHash = UniquePasswordHash,
             });
             db.UserPermissions.Add(new UserPermission
             {
@@ -188,6 +232,7 @@ public sealed class ExportPageTests
             });
             var subnet = new Subnet
             {
+                Id = SubnetId,
                 Name = "Operations",
                 Cidr = "10.0.0.0/24",
                 NetworkAddress = "10.0.0.0",

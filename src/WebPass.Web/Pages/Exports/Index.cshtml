@@ -16,6 +16,7 @@
 <section class="export-scope toast-region" aria-label="导出安全说明">
     <strong>普通导出不包含服务器密码</strong>
     <p>文件仅包含资产与运行状态信息，可按内部数据管理规范保存和共享。</p>
+    <p data-export-scope-summary>@Model.ScopeSummary</p>
 </section>
 
 @if (!ViewData.ModelState.IsValid)
@@ -53,6 +54,6 @@
     <button type="submit"
             data-export-submit
             data-submit-label="正在准备文件">
-        下载导出文件
+        @Model.DownloadLabel
     </button>
 </form>

@@ -16,6 +16,7 @@ using Microsoft.Extensions.Options;
 using WebPass.Web.Application.Assets;
 using WebPass.Web.Application.Authorization;
 using WebPass.Web.Application.Ping;
+using WebPass.Web.Application.Secrets;
 using WebPass.Web.Configuration;
 using WebPass.Web.Data;
 using WebPass.Web.Domain.Entities;
@@ -29,6 +30,11 @@ namespace WebPass.IntegrationTests.Assets;
 
 public sealed class AssetAndPingTests
 {
+    private const string StoredUserPasswordHash =
+        "stored-user-password-hash-7e42d9";
+    private static readonly byte[] StoredSecretCiphertext =
+        [31, 41, 59, 26, 53, 58];
+
     [Fact]
     public async Task List_orders_10_0_0_9_before_10_0_0_10()
     {
@@ -1032,6 +1038,89 @@ public sealed class AssetAndPingTests
     }
 
     [Fact]
+    public async Task Edit_conflict_never_discloses_or_silently_reuses_a_posted_password_or_stored_secret()
+    {
+        const string postedPassword =
+            "posted-conflict-password-93f6a1";
+        using var factory = new ServerPageFactory(
+            NewUser(),
+            PermissionCode.AssetView,
+            PermissionCode.AssetEdit);
+        factory.InitializeData();
+        await factory.AddSubnetAsync();
+        var asset = await factory.AddAssetAsync(
+            "10.0.0.9",
+            "Original location",
+            [1]);
+        await factory.AddSecretAsync(asset.Id, StoredSecretCiphertext);
+        using var client = factory.CreateAuthenticatedClient();
+        var editHtml = await client.GetStringAsync($"/servers/{asset.Id}/edit");
+        await factory.ReplaceCurrentAssetAsync(
+            asset.Id,
+            "10.0.0.10",
+            "Current location",
+            AliveStatus.Fault,
+            "current-computer",
+            "Current system",
+            "Current OS",
+            "Current DB",
+            "Current notes",
+            [2]);
+
+        using var conflict = await client.PostAsync(
+            $"/servers/{asset.Id}/edit",
+            new FormUrlEncodedContent(
+            [
+                new("id", asset.Id.ToString()),
+                new("rowVersion", Convert.ToBase64String([1])),
+                new("Input.BusinessIp", "10.0.0.11"),
+                new("Input.Location", "Draft location"),
+                new("Input.AliveStatus", "Alive"),
+                new("Input.ComputerName", "draft-computer"),
+                new("Input.SystemName", "Draft system"),
+                new("Input.Password", postedPassword),
+                new("__RequestVerificationToken", AntiforgeryToken(editHtml)),
+            ]));
+        var conflictHtml = await conflict.Content.ReadAsStringAsync();
+        var passwordInput = Regex.Match(
+            conflictHtml,
+            "<input[^>]*name=\"Input.Password\"[^>]*>",
+            RegexOptions.Singleline).Value;
+
+        Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
+        Assert.NotEmpty(passwordInput);
+        Assert.DoesNotContain(postedPassword, conflictHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            StoredUserPasswordHash,
+            conflictHtml,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            Convert.ToBase64String(StoredSecretCiphertext),
+            conflictHtml,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("value=", passwordInput, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            "密码不会保留；如需更新密码，请重新输入。",
+            conflictHtml,
+            StringComparison.Ordinal);
+        Assert.Equal(
+            StoredSecretCiphertext,
+            await factory.GetSecretCiphertextAsync(asset.Id));
+
+        using var retry = await client.PostAsync(
+            $"/servers/{asset.Id}/edit",
+            EditForm(
+                asset.Id,
+                Convert.FromBase64String(FormValue(conflictHtml, "rowVersion")),
+                AntiforgeryToken(conflictHtml)));
+
+        Assert.Equal(HttpStatusCode.Redirect, retry.StatusCode);
+        Assert.Equal(
+            StoredSecretCiphertext,
+            await factory.GetSecretCiphertextAsync(asset.Id));
+    }
+
+    [Fact]
     public async Task Ping_global_concurrency_and_normalized_outcomes_are_enforced()
     {
         await using var db = NewDatabase();
@@ -1307,7 +1396,11 @@ public sealed class AssetAndPingTests
         return user;
     }
 
-    private static AppUser NewUser() => new() { Username = Guid.NewGuid().ToString("N"), PasswordHash = "hash" };
+    private static AppUser NewUser() => new()
+    {
+        Username = Guid.NewGuid().ToString("N"),
+        PasswordHash = StoredUserPasswordHash,
+    };
 
     private static async Task<Subnet> AddEnabledSubnetAsync(WebPassDbContext db, string cidr)
     {
@@ -1400,6 +1493,32 @@ public sealed class AssetAndPingTests
             db.ServerAssets.Add(asset);
             await db.SaveChangesAsync();
             return asset;
+        }
+
+        public async Task AddSecretAsync(Guid assetId, byte[] ciphertext)
+        {
+            using var scope = Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<WebPassDbContext>();
+            db.ServerSecrets.Add(new ServerSecret
+            {
+                ServerAssetId = assetId,
+                Ciphertext = ciphertext,
+                Nonce = new byte[12],
+                AuthenticationTag = new byte[16],
+                KeyVersion = 1,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        public async Task<byte[]> GetSecretCiphertextAsync(Guid assetId)
+        {
+            using var scope = Services.CreateScope();
+            return await scope.ServiceProvider
+                .GetRequiredService<WebPassDbContext>()
+                .ServerSecrets
+                .Where(secret => secret.ServerAssetId == assetId)
+                .Select(secret => secret.Ciphertext)
+                .SingleAsync();
         }
 
         public async Task ReplaceCurrentAssetAsync(
@@ -1513,7 +1632,28 @@ public sealed class AssetAndPingTests
             services.RemoveAll<IPingTransport>();
             services.AddSingleton<IPingTransport>(
                 new ConfigurablePingTransport(() => PingResponse));
+            services.RemoveAll<ISecretCipher>();
+            services.AddSingleton<ISecretCipher, NonDisclosingTestCipher>();
         });
+    }
+
+    private sealed class NonDisclosingTestCipher : ISecretCipher
+    {
+        public Task<SecretEnvelope> EncryptAsync(
+            Guid secretId,
+            string plaintext,
+            CancellationToken ct) =>
+            Task.FromResult(new SecretEnvelope(
+                [2, 7, 1, 8, 2, 8],
+                new byte[12],
+                new byte[16],
+                2));
+
+        public Task<string> DecryptAsync(
+            Guid secretId,
+            SecretEnvelope envelope,
+            CancellationToken ct) =>
+            throw new NotSupportedException();
     }
 
     private sealed class ConfigurablePingTransport(

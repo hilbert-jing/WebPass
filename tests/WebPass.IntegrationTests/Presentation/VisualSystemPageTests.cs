@@ -58,6 +58,43 @@ public sealed class VisualSystemPageTests
     }
 
     [Fact]
+    public async Task Error_page_copy_control_targets_only_the_correlation_id_and_uses_shared_live_feedback()
+    {
+        using var factory = new PresentationFactory();
+        using var client = factory.CreateClient();
+
+        var html = await client.GetStringAsync("/error");
+        var correlationId = Regex.Match(
+            html,
+            "<code[^>]*id=\"error-correlation-id\"[^>]*>(?<value>[^<]+)</code>")
+            .Groups["value"]
+            .Value;
+
+        Assert.NotEmpty(correlationId);
+        Assert.Contains("data-copy", html, StringComparison.Ordinal);
+        Assert.Contains(
+            "data-copy-target=\"#error-correlation-id\"",
+            html,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "data-copy-status-target=\"#error-correlation-status\"",
+            html,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "aria-describedby=\"error-correlation-status\"",
+            html,
+            StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"复制关联编号\"", html, StringComparison.Ordinal);
+        Assert.Contains("id=\"error-correlation-status\"", html, StringComparison.Ordinal);
+        Assert.Contains("role=\"status\"", html, StringComparison.Ordinal);
+        Assert.Contains("aria-live=\"polite\"", html, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "data-copy-target=\".auth-panel\"",
+            html,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Authenticated_shell_is_chinese_and_permission_scoped()
     {
         using var factory = new PresentationFactory();
@@ -757,6 +794,47 @@ public sealed class VisualSystemPageTests
         Assert.Contains("action=\"/Logout\"", html, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(".sidebar-logout {", css, StringComparison.Ordinal);
         Assert.Contains("clip-path: none", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Tablet_navigation_reveals_the_existing_accessible_label_on_hover_and_keyboard_focus()
+    {
+        using var factory = new PresentationFactory();
+        factory.InitializeUser(
+            false,
+            PermissionCode.AssetView,
+            PermissionCode.ExportData);
+        using var client = factory.CreateAuthenticatedClient();
+
+        var html = await client.GetStringAsync("/servers");
+        var css = await client.GetStringAsync("/css/site.css");
+        var serversLink = Regex.Match(
+            html,
+            "<a[^>]*href=\"/servers\"[^>]*aria-current[^>]*>.*?</a>",
+            RegexOptions.Singleline).Value;
+
+        Assert.Contains(
+            "aria-current=\"page\"",
+            serversLink,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "<span class=\"nav-label\">服务器资产</span>",
+            serversLink,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "class=\"nav-label\" aria-hidden",
+            serversLink,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("<button", serversLink, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            ".nav-group a:hover .nav-label,",
+            css,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            ".nav-group a:focus-visible .nav-label",
+            css,
+            StringComparison.Ordinal);
+        Assert.Contains("pointer-events: none", css, StringComparison.Ordinal);
     }
 
     [Fact]

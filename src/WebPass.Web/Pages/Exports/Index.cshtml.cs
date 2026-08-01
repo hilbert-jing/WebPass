@@ -5,17 +5,47 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 using WebPass.Web.Application.Assets;
 using WebPass.Web.Application.Authorization;
 using WebPass.Web.Application.Exporting;
+using WebPass.Web.Presentation;
 
 namespace WebPass.Web.Pages.Exports;
 
 [Authorize(Policy = PermissionCode.ExportData)]
 public sealed class IndexModel(AssetExportService exports) : PageModel
 {
-    [BindProperty]
+    [BindProperty(SupportsGet = true)]
     public ExportFormat Format { get; set; } = ExportFormat.Xlsx;
 
-    [BindProperty]
+    [BindProperty(SupportsGet = true)]
     public ServerListQuery Query { get; set; } = new();
+
+    public string DownloadLabel =>
+        Format == ExportFormat.Csv ? "下载 CSV" : "下载 XLSX";
+
+    public string ScopeSummary
+    {
+        get
+        {
+            var filters = new List<string>();
+            if (!string.IsNullOrWhiteSpace(Query.Search))
+            {
+                filters.Add($"搜索“{Query.Search.Trim()}”");
+            }
+
+            if (Query.SubnetId is { } subnetId)
+            {
+                filters.Add($"网段“{subnetId}”");
+            }
+
+            if (Query.Status is { } status)
+            {
+                filters.Add($"状态“{UiLabels.ForAliveStatus(status)}”");
+            }
+
+            return filters.Count == 0
+                ? "当前导出范围：全部服务器。"
+                : $"当前导出范围：{string.Join("；", filters)}。";
+        }
+    }
 
     public void OnGet()
     {

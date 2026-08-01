@@ -20,12 +20,21 @@ public sealed class ReauthenticateModel(ReauthenticationService reauthentication
     [BindProperty(SupportsGet = true)]
     public string? ReturnUrl { get; set; }
 
+    public string SafeReturnUrl { get; private set; } = "/servers";
+
+    public string ReturnActionLabel =>
+        string.Equals(SafeReturnUrl, "/servers", StringComparison.OrdinalIgnoreCase)
+            ? "返回服务器资产"
+            : "返回原页面";
+
     public void OnGet()
     {
+        SetSafeReturnUrl();
     }
 
     public async Task<IActionResult> OnPostAsync(CancellationToken ct)
     {
+        SetSafeReturnUrl();
         if (!ModelState.IsValid)
         {
             return Page();
@@ -41,10 +50,19 @@ public sealed class ReauthenticateModel(ReauthenticationService reauthentication
             return Page();
         }
 
-        return LocalRedirect(
+        TempData["StatusMessage"] =
+            "验证已通过，接下来的 5 分钟内可执行敏感操作。";
+        return RedirectToPage(new { ReturnUrl = SafeReturnUrl });
+    }
+
+    private void SetSafeReturnUrl()
+    {
+        SafeReturnUrl =
             !string.IsNullOrWhiteSpace(ReturnUrl) && Url.IsLocalUrl(ReturnUrl)
                 ? ReturnUrl
-                : "/servers");
+                : "/servers";
+        ReturnUrl = SafeReturnUrl;
+        ModelState.Remove(nameof(ReturnUrl));
     }
 
     private Guid UserId() =>

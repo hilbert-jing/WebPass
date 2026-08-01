@@ -56,7 +56,9 @@ public sealed class EditModel(WebPassDbContext db, ServerAssetService assetServi
             AssetId = current.Id;
             CurrentSnapshot = ServerSnapshot.From(current);
             RowVersion = Convert.ToBase64String(current.RowVersion);
+            Input.Password = null;
             ModelState.Remove(nameof(rowVersion));
+            ModelState.Remove("Input.Password");
             ModelState.AddModelError(string.Empty, exception.Message);
             Response.StatusCode = StatusCodes.Status409Conflict;
             return Page();

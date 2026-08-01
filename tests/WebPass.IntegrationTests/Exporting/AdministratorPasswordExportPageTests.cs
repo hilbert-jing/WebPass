@@ -183,6 +183,104 @@ public sealed class AdministratorPasswordExportPageTests
             workbook.Worksheet(1).Cell(2, 9).GetString());
     }
 
+    [Fact]
+    public async Task Successful_reauthentication_shows_one_time_five_minute_status_and_explicit_local_return()
+    {
+        using var factory = new PasswordExportPageFactory();
+        factory.InitializeData();
+        using var client = factory.CreateAuthenticatedClient(
+            factory.AdministratorId);
+        var token = AntiforgeryToken(
+            await client.GetStringAsync("/secrets/reauthenticate"));
+
+        using var response = await client.PostAsync(
+            "/secrets/reauthenticate",
+            new FormUrlEncodedContent(
+            [
+                new("Input.Password", "current-password"),
+                new("__RequestVerificationToken", token),
+                new("ReturnUrl", "/admin/password-export"),
+            ]));
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.StartsWith(
+            "/secrets/reauthenticate",
+            response.Headers.Location!.OriginalString,
+            StringComparison.OrdinalIgnoreCase);
+
+        using var successResponse = await client.GetAsync(
+            response.Headers.Location);
+        var successHtml = WebUtility.HtmlDecode(
+            await successResponse.Content.ReadAsStringAsync());
+        Assert.Contains(
+            "验证已通过，接下来的 5 分钟内可执行敏感操作。",
+            successHtml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "href=\"/admin/password-export\"",
+            successHtml,
+            StringComparison.Ordinal);
+        Assert.Contains("返回原页面", successHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "value=\"current-password\"",
+            successHtml,
+            StringComparison.Ordinal);
+
+        var refreshedHtml = WebUtility.HtmlDecode(
+            await client.GetStringAsync(response.Headers.Location));
+        Assert.DoesNotContain(
+            "验证已通过，接下来的 5 分钟内可执行敏感操作。",
+            refreshedHtml,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Reauthentication_rejects_external_return_url_and_only_renders_the_local_inventory_fallback()
+    {
+        const string externalMarker = "external-return-secret-bc921e";
+        using var factory = new PasswordExportPageFactory();
+        factory.InitializeData();
+        using var client = factory.CreateAuthenticatedClient(
+            factory.AdministratorId);
+        var token = AntiforgeryToken(
+            await client.GetStringAsync("/secrets/reauthenticate"));
+
+        using var response = await client.PostAsync(
+            "/secrets/reauthenticate",
+            new FormUrlEncodedContent(
+            [
+                new("Input.Password", "current-password"),
+                new("__RequestVerificationToken", token),
+                new(
+                    "ReturnUrl",
+                    $"https://attacker.example/collect?value={externalMarker}"),
+            ]));
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.StartsWith(
+            "/secrets/reauthenticate",
+            response.Headers.Location!.OriginalString,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(
+            "attacker.example",
+            response.Headers.Location.OriginalString,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(
+            externalMarker,
+            response.Headers.Location.OriginalString,
+            StringComparison.Ordinal);
+
+        var html = WebUtility.HtmlDecode(
+            await client.GetStringAsync(response.Headers.Location));
+        Assert.Contains("href=\"/servers\"", html, StringComparison.Ordinal);
+        Assert.Contains(
+            "name=\"ReturnUrl\" value=\"/servers\"",
+            html,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("attacker.example", html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(externalMarker, html, StringComparison.Ordinal);
+    }
+
     private static string AntiforgeryToken(string html)
     {
         var token = Regex.Match(

@@ -107,7 +107,14 @@ else if (modelErrors.Length > 0)
             <div>
                 <label asp-for="Input.Password">新密码</label>
                 <input asp-for="Input.Password" autocomplete="new-password" />
-                <small>留空则保留当前密码</small>
+                @if (Model.CurrentSnapshot is null)
+                {
+                    <small>留空则保留当前密码</small>
+                }
+                else
+                {
+                    <small>密码不会保留；如需更新密码，请重新输入。</small>
+                }
                 <span asp-validation-for="Input.Password"></span>
             </div>
             <div>
