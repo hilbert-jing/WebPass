@@ -915,29 +915,119 @@ public sealed class AssetAndPingTests
     }
 
     [Fact]
-    public async Task Edit_conflict_renders_current_database_values_not_stale_posted_values()
+    public async Task Edit_conflict_preserves_the_posted_draft_beside_the_current_snapshot_and_refreshes_the_token()
     {
         using var factory = new ServerPageFactory(NewUser(), PermissionCode.AssetView, PermissionCode.AssetEdit);
         factory.InitializeData();
         await factory.AddSubnetAsync();
-        var asset = await factory.AddAssetAsync("10.0.0.9", "Current", [1]);
+        var asset = await factory.AddAssetAsync(
+            "10.0.0.9",
+            "Original location",
+            [1],
+            AliveStatus.Unknown,
+            "original-computer",
+            "Original system");
         using var client = factory.CreateAuthenticatedClient();
         var html = await client.GetStringAsync($"/servers/{asset.Id}/edit");
-        var token = Regex.Match(html, "name=\"__RequestVerificationToken\"[^>]*value=\"([^\"]+)\"").Groups[1].Value;
+        var token = AntiforgeryToken(html);
+        await factory.ReplaceCurrentAssetAsync(
+            asset.Id,
+            "10.0.0.10",
+            "Current location",
+            AliveStatus.Fault,
+            "current-computer",
+            "Current system",
+            "Current OS",
+            "Current DB",
+            "Current notes",
+            [2]);
 
         var response = await client.PostAsync($"/servers/{asset.Id}/edit", new FormUrlEncodedContent(
-        [new("id", asset.Id.ToString()), new("rowVersion", Convert.ToBase64String([9])),
-         new("Input.BusinessIp", "10.0.0.9"), new("Input.Location", "Stale"), new("Input.AliveStatus", "Unknown"),
-         new("Input.ComputerName", "stale"), new("Input.SystemName", "Stale"), new("__RequestVerificationToken", token)]));
+        [new("id", asset.Id.ToString()), new("rowVersion", Convert.ToBase64String([1])),
+         new("Input.BusinessIp", "10.0.0.11"), new("Input.Location", "Draft location"), new("Input.AliveStatus", "Alive"),
+         new("Input.ComputerName", "draft-computer"), new("Input.SystemName", "Draft system"),
+         new("Input.OperatingSystemVersion", "Draft OS"), new("Input.DatabaseVersion", "Draft DB"),
+         new("Input.Notes", "Draft notes"), new("__RequestVerificationToken", token)]));
         var conflictHtml = await response.Content.ReadAsStringAsync();
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Contains("Current", conflictHtml, StringComparison.Ordinal);
-        Assert.DoesNotContain("value=\"Stale\"", conflictHtml, StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var draft = HtmlRegion(conflictHtml, "form", "data-server-draft");
+        Assert.Equal("10.0.0.11", FormValue(draft, "Input.BusinessIp"));
+        Assert.Equal("Draft location", FormValue(draft, "Input.Location"));
+        Assert.Equal("1", SelectedValue(draft, "Input.AliveStatus"));
+        Assert.Equal("draft-computer", FormValue(draft, "Input.ComputerName"));
+        Assert.Equal("Draft system", FormValue(draft, "Input.SystemName"));
+        Assert.Equal("Draft OS", FormValue(draft, "Input.OperatingSystemVersion"));
+        Assert.Equal("Draft DB", FormValue(draft, "Input.DatabaseVersion"));
+        Assert.Equal("Draft notes", TextAreaValue(draft, "Input.Notes").TrimStart('\r', '\n'));
+        Assert.Equal(Convert.ToBase64String([2]), FormValue(draft, "rowVersion"));
+
+        var current = WebUtility.HtmlDecode(HtmlRegion(conflictHtml, "section", "data-current-snapshot"));
+        Assert.Contains("10.0.0.10", current, StringComparison.Ordinal);
+        Assert.Contains("Current location", current, StringComparison.Ordinal);
+        Assert.Contains("故障", current, StringComparison.Ordinal);
+        Assert.Contains("current-computer", current, StringComparison.Ordinal);
+        Assert.Contains("Current system", current, StringComparison.Ordinal);
+        Assert.Contains("Current OS", current, StringComparison.Ordinal);
+        Assert.Contains("Current DB", current, StringComparison.Ordinal);
+        Assert.Contains("Current notes", current, StringComparison.Ordinal);
+        Assert.DoesNotContain("Draft location", current, StringComparison.Ordinal);
+        Assert.DoesNotContain("Input.Password", current, StringComparison.Ordinal);
         Assert.Contains(
-            "该服务器已被其他用户修改。以下为最新数据，请核对后重新保存。",
+            "该服务器已被其他用户修改。您的草稿仍保留在编辑表单中；请与数据库最新数据核对后，再明确重新保存。",
             conflictHtml,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Edit_conflict_does_not_overwrite_current_data_until_the_user_explicitly_retries_with_the_new_token()
+    {
+        using var factory = new ServerPageFactory(NewUser(), PermissionCode.AssetView, PermissionCode.AssetEdit);
+        factory.InitializeData();
+        await factory.AddSubnetAsync();
+        var asset = await factory.AddAssetAsync("10.0.0.9", "Original location", [1]);
+        using var client = factory.CreateAuthenticatedClient();
+        var editHtml = await client.GetStringAsync($"/servers/{asset.Id}/edit");
+        await factory.ReplaceCurrentAssetAsync(
+            asset.Id,
+            "10.0.0.10",
+            "Current location",
+            AliveStatus.Fault,
+            "current-computer",
+            "Current system",
+            "Current OS",
+            "Current DB",
+            "Current notes",
+            [2]);
+
+        var conflict = await client.PostAsync(
+            $"/servers/{asset.Id}/edit",
+            EditForm(asset.Id, [1], AntiforgeryToken(editHtml)));
+        var conflictHtml = await conflict.Content.ReadAsStringAsync();
+        var afterConflict = await factory.GetAssetAsync(asset.Id);
+
+        Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
+        Assert.Equal("Current location", afterConflict.Location);
+        Assert.Equal("current-computer", afterConflict.ComputerName);
+        Assert.Equal("Current system", afterConflict.SystemName);
+
+        var retry = await client.PostAsync(
+            $"/servers/{asset.Id}/edit",
+            EditForm(
+                asset.Id,
+                Convert.FromBase64String(FormValue(conflictHtml, "rowVersion")),
+                AntiforgeryToken(conflictHtml)));
+        var afterRetry = await factory.GetAssetAsync(asset.Id);
+
+        Assert.Equal(HttpStatusCode.Redirect, retry.StatusCode);
+        Assert.Equal("10.0.0.11", afterRetry.BusinessIp);
+        Assert.Equal("Draft location", afterRetry.Location);
+        Assert.Equal(AliveStatus.Alive, afterRetry.AliveStatus);
+        Assert.Equal("draft-computer", afterRetry.ComputerName);
+        Assert.Equal("Draft system", afterRetry.SystemName);
+        Assert.Equal("Draft OS", afterRetry.OperatingSystemVersion);
+        Assert.Equal("Draft DB", afterRetry.DatabaseVersion);
+        Assert.Equal("Draft notes", afterRetry.Notes);
     }
 
     [Fact]
@@ -1104,6 +1194,67 @@ public sealed class AssetAndPingTests
         return token;
     }
 
+    private static FormUrlEncodedContent EditForm(Guid assetId, byte[] rowVersion, string antiforgeryToken) =>
+        new(
+        [
+            new("id", assetId.ToString()),
+            new("rowVersion", Convert.ToBase64String(rowVersion)),
+            new("Input.BusinessIp", "10.0.0.11"),
+            new("Input.Location", "Draft location"),
+            new("Input.AliveStatus", "Alive"),
+            new("Input.ComputerName", "draft-computer"),
+            new("Input.SystemName", "Draft system"),
+            new("Input.OperatingSystemVersion", "Draft OS"),
+            new("Input.DatabaseVersion", "Draft DB"),
+            new("Input.Notes", "Draft notes"),
+            new("__RequestVerificationToken", antiforgeryToken),
+        ]);
+
+    private static string FormValue(string html, string name)
+    {
+        var match = Regex.Match(
+            html,
+            $"<input[^>]*name=\"{Regex.Escape(name)}\"[^>]*value=\"([^\"]*)\"",
+            RegexOptions.Singleline);
+        Assert.True(match.Success, $"Could not find form value for {name}.");
+        return WebUtility.HtmlDecode(match.Groups[1].Value);
+    }
+
+    private static string SelectedValue(string html, string name)
+    {
+        var select = Regex.Match(
+            html,
+            $"<select[^>]*name=\"{Regex.Escape(name)}\"[^>]*>(.*?)</select>",
+            RegexOptions.Singleline);
+        Assert.True(select.Success, $"Could not find select for {name}.");
+        var option = Regex.Match(
+            select.Groups[1].Value,
+            "<option[^>]*selected=\"selected\"[^>]*value=\"([^\"]*)\"|<option[^>]*value=\"([^\"]*)\"[^>]*selected=\"selected\"",
+            RegexOptions.Singleline);
+        Assert.True(option.Success, $"Could not find selected option for {name}.");
+        return WebUtility.HtmlDecode(option.Groups[1].Success ? option.Groups[1].Value : option.Groups[2].Value);
+    }
+
+    private static string TextAreaValue(string html, string name)
+    {
+        var match = Regex.Match(
+            html,
+            $"<textarea[^>]*name=\"{Regex.Escape(name)}\"[^>]*>(.*?)</textarea>",
+            RegexOptions.Singleline);
+        Assert.True(match.Success, $"Could not find textarea for {name}.");
+        return WebUtility.HtmlDecode(match.Groups[1].Value);
+    }
+
+    private static string HtmlRegion(string html, string element, string attribute)
+    {
+        var match = Regex.Match(
+            html,
+            $"<{element}[^>]*{attribute}[^>]*>.*?</{element}>",
+            RegexOptions.Singleline);
+        Assert.True(match.Success, $"Could not find {element}[{attribute}].");
+        return match.Value;
+    }
+
     private static Task<HttpResponseMessage> PostPingAsync(
         HttpClient client,
         string endpoint,
@@ -1248,6 +1399,44 @@ public sealed class AssetAndPingTests
             db.ServerAssets.Add(asset);
             await db.SaveChangesAsync();
             return asset;
+        }
+
+        public async Task ReplaceCurrentAssetAsync(
+            Guid assetId,
+            string businessIp,
+            string location,
+            AliveStatus aliveStatus,
+            string computerName,
+            string systemName,
+            string? operatingSystemVersion,
+            string? databaseVersion,
+            string? notes,
+            byte[] rowVersion)
+        {
+            using var scope = Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<WebPassDbContext>();
+            var asset = await db.ServerAssets.SingleAsync(x => x.Id == assetId);
+            asset.BusinessIp = businessIp;
+            asset.BusinessIpNumber = Ipv4Number(businessIp);
+            asset.Location = location;
+            asset.AliveStatus = aliveStatus;
+            asset.ComputerName = computerName;
+            asset.SystemName = systemName;
+            asset.OperatingSystemVersion = operatingSystemVersion;
+            asset.DatabaseVersion = databaseVersion;
+            asset.Notes = notes;
+            asset.RowVersion = rowVersion;
+            await db.SaveChangesAsync();
+        }
+
+        public async Task<ServerAsset> GetAssetAsync(Guid assetId)
+        {
+            using var scope = Services.CreateScope();
+            return await scope.ServiceProvider
+                .GetRequiredService<WebPassDbContext>()
+                .ServerAssets
+                .AsNoTracking()
+                .SingleAsync(x => x.Id == assetId);
         }
 
         private static long Ipv4Number(string ip)

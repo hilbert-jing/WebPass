@@ -6,8 +6,13 @@
         .Select(error => error.ErrorMessage)
         .Where(message => !string.IsNullOrWhiteSpace(message))
         .ToArray() ?? [];
-    var hasConcurrencyError = modelErrors.Any(
-        message => message.Contains("changed by another user", StringComparison.OrdinalIgnoreCase));
+    var currentStatus = Model.CurrentSnapshot?.AliveStatus switch
+    {
+        WebPass.Web.Domain.Enums.AliveStatus.Alive => "存活",
+        WebPass.Web.Domain.Enums.AliveStatus.Fault => "故障",
+        WebPass.Web.Domain.Enums.AliveStatus.Decommissioned => "已下线",
+        _ => "未知",
+    };
 }
 
 <header class="page-header">
@@ -17,9 +22,31 @@
     </div>
 </header>
 
-@if (hasConcurrencyError)
+@if (Model.CurrentSnapshot is not null)
 {
-    <p class="alert-region" role="alert">该服务器已被其他用户修改。以下为最新数据，请核对后重新保存。</p>
+    <p class="alert-region" role="alert">该服务器已被其他用户修改。您的草稿仍保留在编辑表单中；请与数据库最新数据核对后，再明确重新保存。</p>
+    <section class="form-section" data-current-snapshot aria-labelledby="current-snapshot-title">
+        <h2 id="current-snapshot-title">数据库最新数据（只读）</h2>
+        <p>这些值来自刚刚读取的数据库，不会自动替换下方草稿。密码不会从数据库载入。</p>
+        <dl>
+            <dt>业务 IP</dt>
+            <dd>@Model.CurrentSnapshot.BusinessIp</dd>
+            <dt>位置</dt>
+            <dd>@Model.CurrentSnapshot.Location</dd>
+            <dt>状态</dt>
+            <dd>@currentStatus</dd>
+            <dt>计算机名</dt>
+            <dd>@Model.CurrentSnapshot.ComputerName</dd>
+            <dt>系统名称</dt>
+            <dd>@Model.CurrentSnapshot.SystemName</dd>
+            <dt>操作系统版本</dt>
+            <dd>@(Model.CurrentSnapshot.OperatingSystemVersion ?? "—")</dd>
+            <dt>数据库版本</dt>
+            <dd>@(Model.CurrentSnapshot.DatabaseVersion ?? "—")</dd>
+            <dt>备注</dt>
+            <dd>@(Model.CurrentSnapshot.Notes ?? "—")</dd>
+        </dl>
+    </section>
 }
 else if (modelErrors.Length > 0)
 {
@@ -28,9 +55,14 @@ else if (modelErrors.Length > 0)
 
 @if (Model.AssetId is not null)
 {
-    <form method="post">
+    <form method="post" data-server-draft>
         <input type="hidden" name="id" value="@Model.AssetId" />
         <input type="hidden" name="rowVersion" value="@Model.RowVersion" />
+
+        @if (Model.CurrentSnapshot is not null)
+        {
+            <h2>您的草稿（可编辑）</h2>
+        }
 
         <fieldset class="form-section">
             <legend>身份与位置</legend>

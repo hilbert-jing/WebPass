@@ -19,6 +19,7 @@ public sealed class EditModel(WebPassDbContext db, ServerAssetService assetServi
 
     public Guid? AssetId { get; private set; }
     public string? RowVersion { get; private set; }
+    public ServerSnapshot? CurrentSnapshot { get; private set; }
 
     public async Task<IActionResult> OnGetAsync(Guid? id, string? businessIp, CancellationToken ct)
     {
@@ -33,17 +34,7 @@ public sealed class EditModel(WebPassDbContext db, ServerAssetService assetServi
         if (asset is null) return NotFound();
         AssetId = asset.Id;
         RowVersion = Convert.ToBase64String(asset.RowVersion);
-        Input = new IndexModel.ServerForm
-        {
-            BusinessIp = asset.BusinessIp,
-            Location = asset.Location,
-            AliveStatus = asset.AliveStatus,
-            ComputerName = asset.ComputerName,
-            SystemName = asset.SystemName,
-            OperatingSystemVersion = asset.OperatingSystemVersion,
-            DatabaseVersion = asset.DatabaseVersion,
-            Notes = asset.Notes,
-        };
+        Input = ToForm(asset);
         return Page();
     }
 
@@ -57,10 +48,18 @@ public sealed class EditModel(WebPassDbContext db, ServerAssetService assetServi
         }
         catch (ServerAssetConcurrencyException exception)
         {
-            ModelState.Clear();
-            var result = await OnGetAsync(id, null, ct);
+            var current = await db.ServerAssets
+                .AsNoTracking()
+                .SingleOrDefaultAsync(x => x.Id == id && !x.IsArchived, ct);
+            if (current is null) return NotFound();
+
+            AssetId = current.Id;
+            CurrentSnapshot = ServerSnapshot.From(current);
+            RowVersion = Convert.ToBase64String(current.RowVersion);
+            ModelState.Remove(nameof(rowVersion));
             ModelState.AddModelError(string.Empty, exception.Message);
-            return result;
+            Response.StatusCode = StatusCodes.Status409Conflict;
+            return Page();
         }
         catch (ArgumentException exception)
         {
@@ -76,6 +75,18 @@ public sealed class EditModel(WebPassDbContext db, ServerAssetService assetServi
 
     private Guid UserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 
+    private static IndexModel.ServerForm ToForm(ServerAsset asset) => new()
+    {
+        BusinessIp = asset.BusinessIp,
+        Location = asset.Location,
+        AliveStatus = asset.AliveStatus,
+        ComputerName = asset.ComputerName,
+        SystemName = asset.SystemName,
+        OperatingSystemVersion = asset.OperatingSystemVersion,
+        DatabaseVersion = asset.DatabaseVersion,
+        Notes = asset.Notes,
+    };
+
     private static byte[] DecodeRowVersion(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) throw new ArgumentException("A row version is required.", nameof(value));
@@ -88,5 +99,26 @@ public sealed class EditModel(WebPassDbContext db, ServerAssetService assetServi
         {
             throw new ArgumentException("The row version is invalid.", nameof(value));
         }
+    }
+
+    public sealed record ServerSnapshot(
+        string BusinessIp,
+        string Location,
+        Domain.Enums.AliveStatus AliveStatus,
+        string ComputerName,
+        string SystemName,
+        string? OperatingSystemVersion,
+        string? DatabaseVersion,
+        string? Notes)
+    {
+        public static ServerSnapshot From(ServerAsset asset) => new(
+            asset.BusinessIp,
+            asset.Location,
+            asset.AliveStatus,
+            asset.ComputerName,
+            asset.SystemName,
+            asset.OperatingSystemVersion,
+            asset.DatabaseVersion,
+            asset.Notes);
     }
 }
