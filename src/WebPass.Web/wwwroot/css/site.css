@@ -131,6 +131,18 @@ html[data-js-enabled] [data-js-only] {
     display: inline-flex;
 }
 
+[data-secret-reveal-control] {
+    display: none;
+}
+
+html[data-secret-reveal-ready] [data-secret-reveal-control] {
+    display: inline-flex;
+}
+
+html[data-secret-reveal-ready] [data-secret-reveal-fallback] {
+    display: none;
+}
+
 input:not([type="checkbox"]):not([type="radio"]):not([type="submit"]),
 select,
 textarea {

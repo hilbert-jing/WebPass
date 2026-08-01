@@ -576,6 +576,73 @@ public sealed class VisualSystemPageTests
     }
 
     [Fact]
+    public async Task Secret_reveal_defaults_to_a_safe_explanation_until_its_script_is_ready()
+    {
+        using var factory = new PresentationFactory();
+        factory.InitializeUser(
+            false,
+            PermissionCode.AssetView,
+            PermissionCode.SecretReveal);
+        var subnetId = Guid.NewGuid();
+        factory.Seed(db =>
+        {
+            db.Subnets.Add(new Subnet
+            {
+                Id = subnetId,
+                Name = "安全网段",
+                Cidr = "10.20.0.0/24",
+                NetworkAddress = "10.20.0.0",
+                PrefixLength = 24,
+                Location = "总部",
+                IsEnabled = true,
+            });
+            db.ServerAssets.Add(new ServerAsset
+            {
+                SubnetId = subnetId,
+                BusinessIp = "10.20.0.9",
+                BusinessIpNumber = 169082889,
+                Location = "总部",
+                AliveStatus = AliveStatus.Alive,
+                ComputerName = "web-09",
+                SystemName = "WebPass",
+            });
+        });
+        using var client = factory.CreateAuthenticatedClient();
+
+        var html = WebUtility.HtmlDecode(await client.GetStringAsync("/servers"));
+        var css = await client.GetStringAsync("/css/site.css");
+        var revealControl = Regex.Match(
+            html,
+            "<button[^>]*data-secret-reveal-control[^>]*>",
+            RegexOptions.Singleline).Value;
+
+        Assert.Contains(
+            "data-secret-reveal-fallback",
+            html,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "为避免密码暴露，请启用 JavaScript 后查看服务器密码。",
+            html,
+            StringComparison.Ordinal);
+        Assert.NotEmpty(revealControl);
+        Assert.Contains(
+            "[data-secret-reveal-control]",
+            css,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "html[data-secret-reveal-ready] [data-secret-reveal-control]",
+            css,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "html[data-secret-reveal-ready] [data-secret-reveal-fallback]",
+            css,
+            StringComparison.Ordinal);
+        Assert.DoesNotMatch(
+            "(?is)<noscript>.*?/secrets/reveal|<form[^>]+action=\"/secrets/reveal",
+            html);
+    }
+
+    [Fact]
     public async Task Governance_pages_render_chinese_read_only_and_permission_management_contracts()
     {
         using var factory = new PresentationFactory();

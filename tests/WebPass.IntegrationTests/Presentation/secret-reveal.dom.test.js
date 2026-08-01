@@ -87,6 +87,14 @@ class FakeElement {
         return null;
     }
 
+    hasAttribute(name) {
+        return Object.hasOwn(this.attributes, name);
+    }
+
+    setAttribute(name, value) {
+        this.attributes[name] = String(value);
+    }
+
     #matches(selector) {
         return (selector === "[data-secret-reveal]" && this.kind === "reveal") ||
             (selector === "[data-secret-copy]" && this.kind === "copy") ||
@@ -164,7 +172,7 @@ function deferredResponse() {
     };
 }
 
-function createEnvironment() {
+function createEnvironment(options = {}) {
     const clock = new FakeClock();
     const documentTarget = new FakeEventTarget();
     const windowTarget = new FakeEventTarget();
@@ -176,10 +184,17 @@ function createEnvironment() {
     const clipboardWrites = [];
     const redirects = [];
     const tokenInput = { value: "anti-forgery-token" };
+    const root = new FakeElement("root");
 
     const document = {
+        documentElement: root,
         visibilityState: "visible",
-        addEventListener: documentTarget.addEventListener.bind(documentTarget),
+        addEventListener(type, callback) {
+            if (options.failRegistration === `document:${type}`) {
+                throw new Error(`simulated ${type} registration failure`);
+            }
+            documentTarget.addEventListener(type, callback);
+        },
         getElementById(id) {
             return panels.find(panel => panel.attributes.id === id) ?? null;
         },
@@ -196,7 +211,12 @@ function createEnvironment() {
         },
     };
     const window = {
-        addEventListener: windowTarget.addEventListener.bind(windowTarget),
+        addEventListener(type, callback) {
+            if (options.failRegistration === `window:${type}`) {
+                throw new Error(`simulated ${type} registration failure`);
+            }
+            windowTarget.addEventListener(type, callback);
+        },
         clearInterval: clock.clear.bind(clock),
         clearTimeout: clock.clear.bind(clock),
         location: {
@@ -221,21 +241,29 @@ function createEnvironment() {
         },
     };
 
-    vm.runInContext(
-        productionScript,
-        vm.createContext({
-            AbortController,
-            Element: FakeElement,
-            Map,
-            Math,
-            String,
-            URLSearchParams,
-            document,
-            fetch,
-            navigator,
-            window,
-        }),
-        { filename: productionScriptPath });
+    let initializationError = null;
+    try {
+        vm.runInContext(
+            productionScript,
+            vm.createContext({
+                AbortController,
+                Element: FakeElement,
+                Map,
+                Math,
+                String,
+                URLSearchParams,
+                document,
+                fetch,
+                navigator,
+                window,
+            }),
+            { filename: productionScriptPath });
+    } catch (error) {
+        initializationError = error;
+        if (!options.expectInitializationFailure) {
+            throw error;
+        }
+    }
 
     return {
         primary,
@@ -244,6 +272,7 @@ function createEnvironment() {
         clipboardWrites,
         clock,
         fetchCalls,
+        initializationError,
         queueResponse(status, password) {
             fetchQueue.push(Promise.resolve(makeResponse(status, password)));
         },
@@ -251,6 +280,7 @@ function createEnvironment() {
             fetchQueue.push(response.promise);
         },
         redirects,
+        root,
         click(element) {
             documentTarget.dispatch("click", { target: element });
         },
@@ -275,6 +305,27 @@ async function reveal(env, password) {
     env.queueResponse(200, password);
     env.click(env.primary.reveal);
     await flushAsyncWork();
+}
+
+async function testReadinessCommitsOnlyAfterAllHandlersAreInstalled() {
+    const ready = createEnvironment();
+
+    assert.equal(
+        ready.root.hasAttribute("data-secret-reveal-ready"),
+        true,
+        "successful initialization must expose Reveal controls");
+
+    const failed = createEnvironment({
+        failRegistration: "window:pagehide",
+        expectInitializationFailure: true,
+    });
+    assert.match(
+        failed.initializationError.message,
+        /simulated pagehide registration failure/);
+    assert.equal(
+        failed.root.hasAttribute("data-secret-reveal-ready"),
+        false,
+        "partial initialization must keep Reveal controls unavailable");
 }
 
 async function testRequestContractAndPlaintextDestination() {
@@ -479,6 +530,7 @@ async function testPagehideIgnoresStaleForbiddenResponse() {
 
 async function main() {
     const tests = [
+        testReadinessCommitsOnlyAfterAllHandlersAreInstalled,
         testRequestContractAndPlaintextDestination,
         testThirtySecondExpiry,
         testRepeatedRevealClearsAndRejectsLateResponse,

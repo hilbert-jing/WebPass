@@ -35,6 +35,9 @@
         查看密码前需先<a href="/secrets/reauthenticate?returnUrl=%2Fservers">验证当前密码</a>。
     </p>
     <form id="secret-reveal-antiforgery" hidden>@Html.AntiForgeryToken()</form>
+    <p class="form-section" data-secret-reveal-fallback>
+        为避免密码暴露，请启用 JavaScript 后查看服务器密码。
+    </p>
 }
 
 <form method="get" class="command-bar" aria-label="服务器筛选">
@@ -176,6 +179,7 @@
                         @if (Model.CanReveal)
                         {
                             <button type="button"
+                                    data-secret-reveal-control
                                     data-secret-reveal
                                     data-asset-id="@id"
                                     data-output="secret-@id">

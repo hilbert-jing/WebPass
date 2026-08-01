@@ -163,4 +163,5 @@
         }
     });
     window.addEventListener("pagehide", clearAll);
+    document.documentElement.setAttribute("data-secret-reveal-ready", "");
 })();
