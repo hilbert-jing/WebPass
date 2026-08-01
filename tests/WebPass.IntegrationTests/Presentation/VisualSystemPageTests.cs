@@ -138,6 +138,184 @@ public sealed class VisualSystemPageTests
             stylesheetPosition - 1);
     }
 
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("throws-after-hiding")]
+    public async Task Enhancement_boot_restores_the_static_baseline_when_site_initialization_does_not_finish(
+        string scenario)
+    {
+        using var factory = new PresentationFactory();
+        using var client = factory.CreateClient();
+        var boot = await client.GetStringAsync("/js/enhance-boot.js");
+        var site = await client.GetStringAsync("/js/site.js");
+        var harness =
+            """
+            import assert from "node:assert/strict";
+            import vm from "node:vm";
+
+            const bootSource = Buffer
+                .from(process.env.WEBPASS_BOOT_SCRIPT_BASE64, "base64")
+                .toString("utf8");
+            const siteSource = Buffer
+                .from(process.env.WEBPASS_SITE_SCRIPT_BASE64, "base64")
+                .toString("utf8");
+            const scenario = process.env.WEBPASS_ENHANCEMENT_FAILURE;
+            const windowListeners = new Map();
+
+            class Element {
+                constructor(id = "") {
+                    this.id = id;
+                    this.dataset = {};
+                    this.attributes = new Map();
+                }
+                addEventListener(type) {
+                    if (scenario === "throws-after-hiding" &&
+                        this === toggle &&
+                        type === "click") {
+                        throw new Error("simulated site initialization failure");
+                    }
+                }
+                closest() {
+                    return null;
+                }
+                contains() {
+                    return false;
+                }
+                focus() {
+                    document.activeElement = this;
+                }
+                getAttribute(name) {
+                    return this.attributes.get(name) ?? null;
+                }
+                hasAttribute(name) {
+                    return this.attributes.has(name);
+                }
+                querySelector() {
+                    return null;
+                }
+                removeAttribute(name) {
+                    this.attributes.delete(name);
+                }
+                setAttribute(name, value) {
+                    this.attributes.set(name, String(value));
+                }
+            }
+
+            const html = new Element("html");
+            const sidebar = new Element("app-sidebar");
+            sidebar.setAttribute("data-drawer", "");
+            const createDrawer = new Element("register-server");
+            createDrawer.setAttribute("data-drawer", "");
+            const toggle = new Element();
+            toggle.setAttribute("data-nav-toggle", "");
+            toggle.setAttribute("aria-controls", sidebar.id);
+            toggle.setAttribute("aria-expanded", "false");
+            const createOpener = new Element();
+            createOpener.dataset.drawerOpen = createDrawer.id;
+            const byId = new Map([
+                [sidebar.id, sidebar],
+                [createDrawer.id, createDrawer],
+            ]);
+            const document = {
+                activeElement: null,
+                documentElement: html,
+                documentElement: html,
+                addEventListener() {},
+                getElementById(id) {
+                    return byId.get(id) ?? null;
+                },
+                querySelector() {
+                    return null;
+                },
+                querySelectorAll(selector) {
+                    if (selector === "[data-drawer]") {
+                        return [sidebar, createDrawer];
+                    }
+                    if (selector === "[data-drawer-open], [data-nav-toggle]") {
+                        return [toggle, createOpener];
+                    }
+                    if (selector === "[data-nav-toggle]") return [toggle];
+                    return [];
+                },
+            };
+            const window = {
+                addEventListener(type, listener) {
+                    windowListeners.set(type, listener);
+                },
+                matchMedia() {
+                    return {
+                        matches: true,
+                        addEventListener() {},
+                    };
+                },
+                setTimeout() {},
+            };
+            const sandbox = {
+                console,
+                DataTransfer: class {},
+                document,
+                Element,
+                HTMLButtonElement: class extends Element {},
+                HTMLInputElement: class extends Element {},
+                HTMLSelectElement: class extends Element {},
+                navigator: {},
+                window,
+            };
+            vm.createContext(sandbox);
+            vm.runInContext(bootSource, sandbox);
+
+            assert.equal(html.hasAttribute("data-js-loading"), true);
+            assert.equal(html.hasAttribute("data-js-enabled"), false);
+            assert.equal(windowListeners.has("load"), true);
+
+            if (scenario === "throws-after-hiding") {
+                assert.throws(
+                    () => vm.runInContext(siteSource, sandbox),
+                    /simulated site initialization failure/);
+                assert.equal(sidebar.getAttribute("aria-hidden"), "true");
+                assert.equal(createDrawer.getAttribute("aria-hidden"), "true");
+            }
+
+            windowListeners.get("load")();
+
+            assert.equal(html.hasAttribute("data-js-loading"), false);
+            assert.equal(html.hasAttribute("data-js-enabled"), false);
+            assert.equal(sidebar.hasAttribute("aria-hidden"), false);
+            assert.equal(createDrawer.hasAttribute("aria-hidden"), false);
+            assert.equal(toggle.getAttribute("aria-expanded"), "false");
+            process.stdout.write(scenario + "-static-baseline");
+            """;
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo("node")
+            {
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+            },
+        };
+        process.StartInfo.ArgumentList.Add("--input-type=module");
+        process.StartInfo.ArgumentList.Add("--eval");
+        process.StartInfo.ArgumentList.Add(harness);
+        process.StartInfo.Environment["WEBPASS_BOOT_SCRIPT_BASE64"] =
+            Convert.ToBase64String(Encoding.UTF8.GetBytes(boot));
+        process.StartInfo.Environment["WEBPASS_SITE_SCRIPT_BASE64"] =
+            Convert.ToBase64String(Encoding.UTF8.GetBytes(site));
+        process.StartInfo.Environment["WEBPASS_ENHANCEMENT_FAILURE"] = scenario;
+
+        Assert.True(process.Start());
+        var standardOutput = process.StandardOutput.ReadToEndAsync();
+        var standardError = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        var output = await standardOutput;
+        var error = await standardError;
+
+        Assert.True(
+            process.ExitCode == 0,
+            $"Node enhancement failure test failed:{Environment.NewLine}{error}");
+        Assert.Equal($"{scenario}-static-baseline", output);
+    }
+
     [Fact]
     public async Task Server_inventory_renders_subnet_rail_and_drawer_contracts()
     {
@@ -275,6 +453,46 @@ public sealed class VisualSystemPageTests
         Assert.Contains("position: fixed", enhanced, StringComparison.Ordinal);
         Assert.Contains("visibility: hidden", enhanced, StringComparison.Ordinal);
         Assert.Contains("[data-js-only]", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Loading_styles_hide_only_closed_surfaces_without_exposing_dead_controls()
+    {
+        using var factory = new PresentationFactory();
+        using var client = factory.CreateClient();
+
+        var css = await client.GetStringAsync("/css/site.css");
+        var loadingDrawer = Regex.Match(
+            css,
+            "(?ms)^html\\[data-js-loading\\] \\.drawer:not\\(\\[data-open\\]\\)\\s*\\{(?<rules>.*?)^\\}")
+            .Groups["rules"].Value;
+        var mobileStart = css.IndexOf(
+            "@media (max-width: 767px)",
+            StringComparison.Ordinal);
+        var reducedMotionStart = css.IndexOf(
+            "@media (prefers-reduced-motion: reduce)",
+            mobileStart,
+            StringComparison.Ordinal);
+        Assert.InRange(mobileStart, 0, css.Length - 1);
+        Assert.InRange(reducedMotionStart, mobileStart + 1, css.Length - 1);
+        var mobileCss = css[mobileStart..reducedMotionStart];
+        var loadingSidebar = Regex.Match(
+            mobileCss,
+            "(?ms)^\\s*html\\[data-js-loading\\] \\.app-sidebar:not\\(\\[data-open\\]\\)\\s*\\{(?<rules>.*?)^\\s*\\}")
+            .Groups["rules"].Value;
+
+        Assert.Contains("visibility: hidden", loadingDrawer, StringComparison.Ordinal);
+        Assert.DoesNotContain("position:", loadingDrawer, StringComparison.Ordinal);
+        Assert.DoesNotContain("transform:", loadingDrawer, StringComparison.Ordinal);
+        Assert.Contains("visibility: hidden", loadingSidebar, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "html[data-js-loading] .nav-toggle",
+            css,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "html[data-js-enabled] .nav-toggle",
+            mobileCss,
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -582,7 +800,19 @@ public sealed class VisualSystemPageTests
                         method,
                         (...args) => externalCalls.push([`console.${method}`, ...args]),
                     ]));
+                const rootAttributes = new Set(["data-js-loading"]);
                 const document = {
+                    documentElement: {
+                        hasAttribute(name) {
+                            return rootAttributes.has(name);
+                        },
+                        removeAttribute(name) {
+                            rootAttributes.delete(name);
+                        },
+                        setAttribute(name) {
+                            rootAttributes.add(name);
+                        },
+                    },
                     addEventListener(type, handler) {
                         if (type === "click") clickHandler = handler;
                     },
@@ -640,6 +870,8 @@ public sealed class VisualSystemPageTests
                 vm.createContext(sandbox);
                 vm.runInContext(source, sandbox);
                 assert.equal(typeof clickHandler, "function");
+                assert.equal(rootAttributes.has("data-js-loading"), false);
+                assert.equal(rootAttributes.has("data-js-enabled"), true);
 
                 clickHandler({ target: button });
                 await Promise.resolve();
@@ -1135,9 +1367,13 @@ public sealed class VisualSystemPageTests
                         this === drawer &&
                         name === "aria-hidden") {
                         assert.equal(
-                            html.hasAttribute("data-js-enabled"),
+                            html.hasAttribute("data-js-loading"),
                             true,
-                            "The head boot script must mark enhancement before hiding a drawer");
+                            "The head boot script must mark loading before site initialization");
+                        assert.equal(
+                            html.hasAttribute("data-js-enabled"),
+                            false,
+                            "Interactive enhancement is not committed until initialization finishes");
                     }
                     this.attributes.set(name, String(value));
                 }
@@ -1208,6 +1444,7 @@ public sealed class VisualSystemPageTests
                 HTMLSelectElement: class extends Element {},
                 navigator: {},
                 window: {
+                    addEventListener() {},
                     matchMedia() {
                         return {
                             matches: false,
@@ -1224,6 +1461,7 @@ public sealed class VisualSystemPageTests
 
             if (scenario === "enhancement-marker") {
                 assert.equal(html.hasAttribute("data-js-enabled"), true);
+                assert.equal(html.hasAttribute("data-js-loading"), false);
                 assert.equal(drawer.getAttribute("aria-hidden"), "true");
             }
 
@@ -1359,6 +1597,8 @@ public sealed class VisualSystemPageTests
                 }
             }
 
+            const html = new Element("html");
+            html.attributes.set("data-js-loading", "");
             const sidebar = new Element("app-sidebar");
             const closeButton = new Element();
             const navLink = new Element();
@@ -1375,6 +1615,7 @@ public sealed class VisualSystemPageTests
             };
             const document = {
                 activeElement: null,
+                documentElement: html,
                 addEventListener(type, handler) {
                     documentListeners.set(type, handler);
                 },
@@ -1419,6 +1660,8 @@ public sealed class VisualSystemPageTests
             vm.createContext(sandbox);
             vm.runInContext(source, sandbox);
 
+            assert.equal(html.hasAttribute("data-js-loading"), false);
+            assert.equal(html.hasAttribute("data-js-enabled"), true);
             assert.equal(sidebar.getAttribute("aria-hidden"), "true");
             assert.equal(toggle.getAttribute("aria-expanded"), "false");
             assert.equal(toggle.focused, true);

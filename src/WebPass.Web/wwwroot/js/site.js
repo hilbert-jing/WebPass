@@ -234,4 +234,7 @@
         format.addEventListener("change", updateExportLabel);
         updateExportLabel();
     });
+
+    document.documentElement.setAttribute("data-js-enabled", "");
+    document.documentElement.removeAttribute("data-js-loading");
 })();

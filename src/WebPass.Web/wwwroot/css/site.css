@@ -537,6 +537,10 @@ table tbody tr:last-child td {
     padding: 20px;
 }
 
+html[data-js-loading] .drawer:not([data-open]) {
+    visibility: hidden;
+}
+
 html[data-js-enabled] .drawer {
     position: fixed;
     z-index: 100;
@@ -766,6 +770,10 @@ html[data-js-enabled] .drawer[data-open] {
 @media (max-width: 767px) {
     .app-shell {
         display: block;
+    }
+
+    html[data-js-loading] .app-sidebar:not([data-open]) {
+        visibility: hidden;
     }
 
     html[data-js-enabled] .app-sidebar {
