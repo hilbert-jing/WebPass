@@ -219,7 +219,6 @@ public sealed class VisualSystemPageTests
             const document = {
                 activeElement: null,
                 documentElement: html,
-                documentElement: html,
                 addEventListener() {},
                 getElementById(id) {
                     return byId.get(id) ?? null;
