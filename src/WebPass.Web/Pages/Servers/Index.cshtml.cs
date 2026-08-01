@@ -88,16 +88,9 @@ public sealed class IndexModel(
             id,
             UserId(),
             TempData,
-            () => RedirectToPage(new
-            {
-                Query.Search,
-                Query.SubnetId,
-                Query.Status,
-                Query.IncludeArchived,
-                Query.PoolMode,
-                Query.Skip,
-                Query.Take,
-            }),
+            feedback => RedirectToPage(
+                "/Servers/Index",
+                PingCommandWorkflow.TargetRouteValues(feedback)),
             ct);
     }
 

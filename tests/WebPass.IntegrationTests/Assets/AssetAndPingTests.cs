@@ -343,17 +343,92 @@ public sealed class AssetAndPingTests
         var responseHtml = WebUtility.HtmlDecode(
             await client.GetStringAsync(response.Headers.Location!));
         var targetRow = ServerRow(responseHtml, target.Id);
-        var otherRow = ServerRow(responseHtml, other.Id);
 
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
         Assert.Contains("data-ping-feedback", targetRow, StringComparison.Ordinal);
         Assert.Contains("Ping 可达 · 12 ms", targetRow, StringComparison.Ordinal);
         Assert.Contains(">标记为存活<", targetRow, StringComparison.Ordinal);
-        Assert.DoesNotContain("data-ping-feedback", otherRow, StringComparison.Ordinal);
-        Assert.DoesNotContain(">标记为存活<", otherRow, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            $"data-asset-id=\"{other.Id}\"",
+            responseHtml,
+            StringComparison.Ordinal);
         Assert.Equal(
             AliveStatus.Fault,
             (await factory.GetAssetsAsync()).Single(x => x.Id == target.Id).AliveStatus);
+    }
+
+    [Fact]
+    public async Task Inventory_ping_from_second_page_redirects_to_the_target_row_with_feedback()
+    {
+        using var factory = new ServerPageFactory(
+            NewUser(),
+            PermissionCode.AssetView,
+            PermissionCode.PingExecute);
+        factory.InitializeData();
+        await factory.AddSubnetAsync();
+        var target = await AddPagedAssetsAsync(factory);
+        using var client = factory.CreateAuthenticatedClient();
+        var secondPage = await client.GetStringAsync(
+            "/servers?Query.Skip=50&Query.Take=50");
+        var token = AntiforgeryToken(secondPage);
+        Assert.Contains(
+            $"data-asset-id=\"{target.Id}\"",
+            secondPage,
+            StringComparison.Ordinal);
+
+        var response = await PostPingAsync(
+            client,
+            "/servers?handler=Ping",
+            target.Id,
+            token);
+        var responseHtml = WebUtility.HtmlDecode(
+            await client.GetStringAsync(response.Headers.Location!));
+        var targetRow = ServerRow(responseHtml, target.Id);
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Contains(
+            "Query.Search=10.0.0.51",
+            Uri.UnescapeDataString(response.Headers.Location!.OriginalString),
+            StringComparison.Ordinal);
+        Assert.Contains("Ping 可达 · 12 ms", targetRow, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Ping_follow_redirect_finds_target_excluded_by_inventory_filter_or_direct_default_page(
+        bool useDirectRoute)
+    {
+        using var factory = new ServerPageFactory(
+            NewUser(),
+            PermissionCode.AssetView,
+            PermissionCode.PingExecute);
+        factory.InitializeData();
+        await factory.AddSubnetAsync();
+        var target = await AddPagedAssetsAsync(
+            factory,
+            targetStatus: AliveStatus.Fault);
+        using var client = factory.CreateAuthenticatedClient();
+        var token = AntiforgeryToken(await client.GetStringAsync("/servers"));
+        var endpoint = useDirectRoute
+            ? $"/servers/{target.Id}/ping"
+            : "/servers?handler=Ping&Query.Status=Alive";
+
+        var response = await PostPingAsync(
+            client,
+            endpoint,
+            target.Id,
+            token);
+        var responseHtml = WebUtility.HtmlDecode(
+            await client.GetStringAsync(response.Headers.Location!));
+        var targetRow = ServerRow(responseHtml, target.Id);
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Contains(
+            "Query.Search=10.0.0.51",
+            Uri.UnescapeDataString(response.Headers.Location!.OriginalString),
+            StringComparison.Ordinal);
+        Assert.Contains("Ping 可达 · 12 ms", targetRow, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -1052,6 +1127,25 @@ public sealed class AssetAndPingTests
         return match.Value;
     }
 
+    private static async Task<ServerAsset> AddPagedAssetsAsync(
+        ServerPageFactory factory,
+        AliveStatus targetStatus = AliveStatus.Unknown)
+    {
+        ServerAsset? target = null;
+        for (var host = 1; host <= 51; host++)
+        {
+            target = await factory.AddAssetAsync(
+                $"10.0.0.{host}",
+                $"Rack {host}",
+                [(byte)host],
+                host == 51 ? targetStatus : AliveStatus.Unknown,
+                $"computer-{host}",
+                $"System {host}");
+        }
+
+        return target!;
+    }
+
     private static async Task<AppUser> AddUserAsync(WebPassDbContext db, params string[] permissions)
     {
         var user = NewUser();
@@ -1144,7 +1238,7 @@ public sealed class AssetAndPingTests
             {
                 SubnetId = subnet.Id,
                 BusinessIp = ip,
-                BusinessIpNumber = 167772169,
+                BusinessIpNumber = Ipv4Number(ip),
                 Location = location,
                 AliveStatus = aliveStatus,
                 ComputerName = computerName,
@@ -1154,6 +1248,15 @@ public sealed class AssetAndPingTests
             db.ServerAssets.Add(asset);
             await db.SaveChangesAsync();
             return asset;
+        }
+
+        private static long Ipv4Number(string ip)
+        {
+            var bytes = IPAddress.Parse(ip).GetAddressBytes();
+            return ((long)bytes[0] << 24) |
+                ((long)bytes[1] << 16) |
+                ((long)bytes[2] << 8) |
+                bytes[3];
         }
 
         public HttpClient CreateAuthenticatedClient()

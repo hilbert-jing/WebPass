@@ -1,5 +1,7 @@
+using System.Net;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
 using WebPass.Web.Application.Ping;
 
@@ -7,6 +9,7 @@ namespace WebPass.Web.Presentation;
 
 public sealed record ServerPingFeedback(
     Guid AssetId,
+    string TargetBusinessIp,
     string Outcome,
     long? LatencyMilliseconds)
 {
@@ -34,7 +37,7 @@ public static class PingCommandWorkflow
         Guid assetId,
         Guid actorUserId,
         ITempDataDictionary tempData,
-        Func<IActionResult> redirect,
+        Func<ServerPingFeedback, IActionResult> redirect,
         CancellationToken ct)
     {
         try
@@ -43,12 +46,13 @@ public static class PingCommandWorkflow
                 assetId,
                 actorUserId,
                 ct);
-            tempData[FeedbackKey] = JsonSerializer.Serialize(
-                new ServerPingFeedback(
-                    result.ServerAssetId,
-                    result.Outcome,
-                    result.LatencyMilliseconds));
-            return redirect();
+            var feedback = new ServerPingFeedback(
+                result.ServerAssetId,
+                result.TargetIp,
+                result.Outcome,
+                result.LatencyMilliseconds);
+            tempData[FeedbackKey] = JsonSerializer.Serialize(feedback);
+            return redirect(feedback);
         }
         catch (UnauthorizedAccessException)
         {
@@ -104,6 +108,7 @@ public static class PingCommandWorkflow
                 serialized);
             if (feedback is null ||
                 feedback.AssetId == Guid.Empty ||
+                !IsCanonicalIpv4(feedback.TargetBusinessIp) ||
                 feedback.LatencyMilliseconds < 0 ||
                 feedback.Outcome is not (
                     "Success" or
@@ -121,4 +126,21 @@ public static class PingCommandWorkflow
             return null;
         }
     }
+
+    public static RouteValueDictionary TargetRouteValues(
+        ServerPingFeedback feedback) =>
+        new()
+        {
+            ["Query.Search"] = feedback.TargetBusinessIp,
+        };
+
+    private static bool IsCanonicalIpv4(string? value) =>
+        value is not null &&
+        IPAddress.TryParse(value, out var address) &&
+        address.AddressFamily ==
+            System.Net.Sockets.AddressFamily.InterNetwork &&
+        string.Equals(
+            value,
+            address.ToString(),
+            StringComparison.Ordinal);
 }

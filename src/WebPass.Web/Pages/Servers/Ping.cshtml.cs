@@ -24,6 +24,8 @@ public sealed class PingModel(PingService pingService) : PageModel
             Guid.Parse(
                 User.FindFirstValue(ClaimTypes.NameIdentifier)!),
             TempData,
-            () => RedirectToPage("/Servers/Index"),
+            feedback => RedirectToPage(
+                "/Servers/Index",
+                PingCommandWorkflow.TargetRouteValues(feedback)),
             ct);
 }
