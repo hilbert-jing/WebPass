@@ -661,7 +661,16 @@ html[data-js-enabled] .drawer[data-open] {
     }
 
     .app-sidebar {
-        overflow: visible;
+        width: 72px;
+        overflow-x: hidden;
+        overflow-y: auto;
+        transition: width var(--motion-standard) ease;
+    }
+
+    .app-sidebar:hover,
+    .app-sidebar:focus-within {
+        width: 232px;
+        box-shadow: var(--shadow-panel);
     }
 
     .sidebar-heading {
@@ -690,28 +699,36 @@ html[data-js-enabled] .drawer[data-open] {
         padding-inline: 8px;
     }
 
-    .nav-group a:hover .nav-label,
-    .nav-group a:focus-visible .nav-label {
-        position: absolute;
-        z-index: 40;
-        top: 50%;
-        inset-inline-start: calc(100% + 10px);
-        width: max-content;
-        max-width: min(240px, calc(100vw - 100px));
+    .app-sidebar:hover .brand-copy,
+    .app-sidebar:hover .nav-group h2,
+    .app-sidebar:hover .nav-label,
+    .app-sidebar:hover .account-copy,
+    .app-sidebar:focus-within .brand-copy,
+    .app-sidebar:focus-within .nav-group h2,
+    .app-sidebar:focus-within .nav-label,
+    .app-sidebar:focus-within .account-copy {
+        position: static;
+        width: auto;
         height: auto;
         overflow: visible;
         clip-path: none;
-        transform: translateY(-50%);
-        border: 1px solid color-mix(in srgb, var(--color-canvas) 18%, transparent);
-        border-radius: var(--radius-control);
-        background: var(--color-nav);
-        box-shadow: var(--shadow-panel);
-        color: var(--color-canvas);
-        padding: 7px 10px;
-        font-size: .8125rem;
-        font-weight: 600;
-        line-height: 1.35;
-        pointer-events: none;
+        white-space: normal;
+    }
+
+    .app-sidebar:hover .sidebar-heading,
+    .app-sidebar:focus-within .sidebar-heading {
+        justify-content: flex-start;
+        padding-inline: 18px;
+    }
+
+    .app-sidebar:hover .nav-group a,
+    .app-sidebar:focus-within .nav-group a {
+        justify-content: flex-start;
+        padding-inline: 10px;
+    }
+
+    .app-sidebar:hover .nav-label,
+    .app-sidebar:focus-within .nav-label {
         white-space: nowrap;
     }
 
@@ -719,6 +736,12 @@ html[data-js-enabled] .drawer[data-open] {
         display: flex;
         flex-direction: column;
         justify-content: center;
+    }
+
+    .app-sidebar:hover .sidebar-account,
+    .app-sidebar:focus-within .sidebar-account {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
     }
 
     .sidebar-logout {

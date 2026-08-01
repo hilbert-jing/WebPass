@@ -797,7 +797,7 @@ public sealed class VisualSystemPageTests
     }
 
     [Fact]
-    public async Task Tablet_navigation_reveals_the_existing_accessible_label_on_hover_and_keyboard_focus()
+    public async Task Short_tablet_navigation_keeps_a_scrollable_rail_and_reveals_existing_labels_within_it()
     {
         using var factory = new PresentationFactory();
         factory.InitializeUser(
@@ -808,6 +808,16 @@ public sealed class VisualSystemPageTests
 
         var html = await client.GetStringAsync("/servers");
         var css = await client.GetStringAsync("/css/site.css");
+        var tabletStart = css.IndexOf(
+            "@media (min-width: 768px) and (max-width: 1279px)",
+            StringComparison.Ordinal);
+        var mobileStart = css.IndexOf(
+            "@media (max-width: 767px)",
+            tabletStart,
+            StringComparison.Ordinal);
+        Assert.InRange(tabletStart, 0, css.Length - 1);
+        Assert.InRange(mobileStart, tabletStart + 1, css.Length - 1);
+        var tabletCss = css[tabletStart..mobileStart];
         var serversLink = Regex.Match(
             html,
             "<a[^>]*href=\"/servers\"[^>]*aria-current[^>]*>.*?</a>",
@@ -827,14 +837,30 @@ public sealed class VisualSystemPageTests
             StringComparison.Ordinal);
         Assert.DoesNotContain("<button", serversLink, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(
-            ".nav-group a:hover .nav-label,",
-            css,
+            ".app-sidebar:hover,",
+            tabletCss,
             StringComparison.Ordinal);
         Assert.Contains(
-            ".nav-group a:focus-visible .nav-label",
-            css,
+            ".app-sidebar:focus-within",
+            tabletCss,
             StringComparison.Ordinal);
-        Assert.Contains("pointer-events: none", css, StringComparison.Ordinal);
+        Assert.Contains(
+            ".app-sidebar:hover .nav-label,",
+            tabletCss,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            ".app-sidebar:focus-within .nav-label",
+            tabletCss,
+            StringComparison.Ordinal);
+        Assert.Contains("width: 72px", tabletCss, StringComparison.Ordinal);
+        Assert.Contains("width: 232px", tabletCss, StringComparison.Ordinal);
+        Assert.Contains("overflow-x: hidden", tabletCss, StringComparison.Ordinal);
+        Assert.Contains("overflow-y: auto", tabletCss, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            ".app-sidebar {\n        overflow: visible;",
+            tabletCss,
+            StringComparison.Ordinal);
+        Assert.Contains("class=\"sidebar-logout\"", html, StringComparison.Ordinal);
     }
 
     [Fact]
