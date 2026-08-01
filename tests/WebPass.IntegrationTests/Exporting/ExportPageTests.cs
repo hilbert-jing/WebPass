@@ -43,16 +43,16 @@ public sealed class ExportPageTests
         Assert.Contains("导出服务器数据", html, StringComparison.Ordinal);
         Assert.Contains("普通导出不包含服务器密码", html, StringComparison.Ordinal);
         Assert.Contains("class=\"export-scope", html, StringComparison.Ordinal);
-        Assert.Contains("data-export-format", html, StringComparison.Ordinal);
         Assert.Contains("data-export-submit", html, StringComparison.Ordinal);
         Assert.Contains("存活", html, StringComparison.Ordinal);
         Assert.Contains("异常", html, StringComparison.Ordinal);
         Assert.Contains("停用", html, StringComparison.Ordinal);
+        Assert.Contains("下载 CSV", html, StringComparison.Ordinal);
         Assert.Contains("下载 XLSX", html, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task Selected_csv_and_filters_render_accurate_no_script_label_and_secret_free_scope_summary()
+    public async Task Filters_render_secret_free_scope_summary_with_explicit_no_script_export_actions()
     {
         using var factory = new ExportPageFactory();
         factory.InitializeData();
@@ -60,24 +60,27 @@ public sealed class ExportPageTests
 
         var html = WebUtility.HtmlDecode(await client.GetStringAsync(
             $"/exports?Format=Csv&Query.Search=ERP&Query.SubnetId={factory.SubnetId}&Query.Status=Alive"));
-        var submit = Regex.Match(
+        var submitButtons = Regex.Matches(
             html,
             "<button[^>]*data-export-submit[^>]*>.*?</button>",
-            RegexOptions.Singleline).Value;
+            RegexOptions.Singleline).Cast<Match>()
+            .Select(match => match.Value)
+            .ToArray();
         var summary = Regex.Match(
             html,
             "<p[^>]*data-export-scope-summary[^>]*>.*?</p>",
             RegexOptions.Singleline).Value;
 
-        Assert.Equal(
-            "下载 CSV",
-            Regex.Replace(
-                Regex.Match(
-                    submit,
-                    ">(?<label>.*?)</button>",
-                    RegexOptions.Singleline).Groups["label"].Value,
-                "\\s+",
-                " ").Trim());
+        Assert.Contains(
+            submitButtons,
+            button => button.Contains("name=\"Format\"", StringComparison.Ordinal) &&
+                button.Contains("value=\"Csv\"", StringComparison.Ordinal) &&
+                button.Contains("下载 CSV", StringComparison.Ordinal));
+        Assert.Contains(
+            submitButtons,
+            button => button.Contains("name=\"Format\"", StringComparison.Ordinal) &&
+                button.Contains("value=\"Xlsx\"", StringComparison.Ordinal) &&
+                button.Contains("下载 XLSX", StringComparison.Ordinal));
         Assert.Contains("搜索“ERP”", summary, StringComparison.Ordinal);
         Assert.Contains(factory.SubnetId.ToString(), summary, StringComparison.Ordinal);
         Assert.Contains("状态“存活”", summary, StringComparison.Ordinal);
@@ -108,14 +111,17 @@ public sealed class ExportPageTests
     [Theory]
     [InlineData(
         "Csv",
+        "下载 CSV",
         "text/csv",
         ".csv")]
     [InlineData(
         "Xlsx",
+        "下载 XLSX",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         ".xlsx")]
-    public async Task Authorized_download_is_a_secret_free_no_store_attachment(
+    public async Task Explicit_no_script_action_downloads_the_labelled_secret_free_no_store_attachment(
         string format,
+        string actionLabel,
         string contentType,
         string extension)
     {
@@ -128,6 +134,14 @@ public sealed class ExportPageTests
             "name=\"__RequestVerificationToken\"[^>]*value=\"([^\"]+)\"")
             .Groups[1]
             .Value;
+        var action = Regex.Matches(
+            html,
+            "<button[^>]*data-export-submit[^>]*>.*?</button>",
+            RegexOptions.Singleline).Cast<Match>()
+            .Select(match => match.Value)
+            .Single(button => button.Contains(actionLabel, StringComparison.Ordinal));
+        Assert.Contains("name=\"Format\"", action, StringComparison.Ordinal);
+        Assert.Contains($"value=\"{format}\"", action, StringComparison.Ordinal);
         using var form = new FormUrlEncodedContent(
         [
             new("__RequestVerificationToken", token),

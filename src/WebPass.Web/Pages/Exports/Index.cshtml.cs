@@ -18,9 +18,6 @@ public sealed class IndexModel(AssetExportService exports) : PageModel
     [BindProperty(SupportsGet = true)]
     public ServerListQuery Query { get; set; } = new();
 
-    public string DownloadLabel =>
-        Format == ExportFormat.Csv ? "下载 CSV" : "下载 XLSX";
-
     public string ScopeSummary
     {
         get

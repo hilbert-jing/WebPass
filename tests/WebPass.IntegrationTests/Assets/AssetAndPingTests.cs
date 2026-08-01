@@ -894,6 +894,48 @@ public sealed class AssetAndPingTests
     }
 
     [Fact]
+    public async Task Edit_alive_status_options_use_chinese_labels_without_changing_values_or_selection()
+    {
+        using var factory = new ServerPageFactory(NewUser(), PermissionCode.AssetView, PermissionCode.AssetEdit);
+        factory.InitializeData();
+        await factory.AddSubnetAsync();
+        var asset = await factory.AddAssetAsync(
+            "10.0.0.9",
+            "HQ",
+            [1],
+            AliveStatus.Fault);
+        using var client = factory.CreateAuthenticatedClient();
+
+        var html = WebUtility.HtmlDecode(
+            await client.GetStringAsync($"/servers/{asset.Id}/edit"));
+        var select = Regex.Match(
+            html,
+            "<select[^>]*name=\"Input.AliveStatus\"[^>]*>.*?</select>",
+            RegexOptions.Singleline).Value;
+        var expectedOptions = new[]
+        {
+            (Value: "0", Label: "未知", Selected: false),
+            (Value: "1", Label: "存活", Selected: false),
+            (Value: "2", Label: "异常", Selected: true),
+            (Value: "3", Label: "停用", Selected: false),
+        };
+
+        Assert.NotEmpty(select);
+        foreach (var expected in expectedOptions)
+        {
+            var option = Regex.Match(
+                select,
+                $"<option(?=[^>]*value=\"{expected.Value}\")[^>]*>(?<label>.*?)</option>",
+                RegexOptions.Singleline);
+            Assert.True(option.Success, $"Missing alive-status option value {expected.Value}.");
+            Assert.Equal(expected.Label, option.Groups["label"].Value.Trim());
+            Assert.Equal(
+                expected.Selected,
+                option.Value.Contains("selected", StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    [Fact]
     public async Task Edit_business_rule_failure_uses_safe_chinese_message()
     {
         using var factory = new ServerPageFactory(NewUser(), PermissionCode.AssetView, PermissionCode.AssetEdit);

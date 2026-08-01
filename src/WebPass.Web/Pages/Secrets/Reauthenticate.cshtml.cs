@@ -52,7 +52,7 @@ public sealed class ReauthenticateModel(ReauthenticationService reauthentication
 
         TempData["StatusMessage"] =
             "验证已通过，接下来的 5 分钟内可执行敏感操作。";
-        return RedirectToPage(new { ReturnUrl = SafeReturnUrl });
+        return LocalRedirect(SafeReturnUrl);
     }
 
     private void SetSafeReturnUrl()

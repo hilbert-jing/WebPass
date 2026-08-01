@@ -768,7 +768,7 @@ html[data-js-enabled] .drawer[data-open] {
         display: block;
     }
 
-    .app-sidebar {
+    html[data-js-enabled] .app-sidebar {
         position: fixed;
         inset: 0 auto 0 0;
         width: min(88vw, 320px);
@@ -781,13 +781,13 @@ html[data-js-enabled] .drawer[data-open] {
         visibility: hidden;
     }
 
-    .app-sidebar[data-open] {
+    html[data-js-enabled] .app-sidebar[data-open] {
         transform: translateX(0);
         visibility: visible;
     }
 
-    .sidebar-close,
-    .nav-toggle {
+    html[data-js-enabled] .sidebar-close,
+    html[data-js-enabled] .nav-toggle {
         display: inline-flex;
     }
 

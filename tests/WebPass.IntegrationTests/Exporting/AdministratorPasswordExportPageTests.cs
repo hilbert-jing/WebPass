@@ -184,7 +184,7 @@ public sealed class AdministratorPasswordExportPageTests
     }
 
     [Fact]
-    public async Task Successful_reauthentication_shows_one_time_five_minute_status_and_explicit_local_return()
+    public async Task Successful_reauthentication_redirects_to_the_local_destination_with_one_time_five_minute_status()
     {
         using var factory = new PasswordExportPageFactory();
         factory.InitializeData();
@@ -203,10 +203,9 @@ public sealed class AdministratorPasswordExportPageTests
             ]));
 
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
-        Assert.StartsWith(
-            "/secrets/reauthenticate",
-            response.Headers.Location!.OriginalString,
-            StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(
+            "/admin/password-export",
+            response.Headers.Location!.OriginalString);
 
         using var successResponse = await client.GetAsync(
             response.Headers.Location);
@@ -216,18 +215,14 @@ public sealed class AdministratorPasswordExportPageTests
             "验证已通过，接下来的 5 分钟内可执行敏感操作。",
             successHtml,
             StringComparison.Ordinal);
-        Assert.Contains(
-            "href=\"/admin/password-export\"",
-            successHtml,
-            StringComparison.Ordinal);
-        Assert.Contains("返回原页面", successHtml, StringComparison.Ordinal);
+        Assert.Contains("导出服务器密码", successHtml, StringComparison.Ordinal);
         Assert.DoesNotContain(
             "value=\"current-password\"",
             successHtml,
             StringComparison.Ordinal);
 
         var refreshedHtml = WebUtility.HtmlDecode(
-            await client.GetStringAsync(response.Headers.Location));
+            await client.GetStringAsync("/admin/password-export"));
         Assert.DoesNotContain(
             "验证已通过，接下来的 5 分钟内可执行敏感操作。",
             refreshedHtml,
@@ -235,7 +230,7 @@ public sealed class AdministratorPasswordExportPageTests
     }
 
     [Fact]
-    public async Task Reauthentication_rejects_external_return_url_and_only_renders_the_local_inventory_fallback()
+    public async Task Reauthentication_rejects_external_return_url_and_redirects_to_the_local_inventory_fallback()
     {
         const string externalMarker = "external-return-secret-bc921e";
         using var factory = new PasswordExportPageFactory();
@@ -257,10 +252,7 @@ public sealed class AdministratorPasswordExportPageTests
             ]));
 
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
-        Assert.StartsWith(
-            "/secrets/reauthenticate",
-            response.Headers.Location!.OriginalString,
-            StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("/servers", response.Headers.Location!.OriginalString);
         Assert.DoesNotContain(
             "attacker.example",
             response.Headers.Location.OriginalString,
@@ -272,11 +264,11 @@ public sealed class AdministratorPasswordExportPageTests
 
         var html = WebUtility.HtmlDecode(
             await client.GetStringAsync(response.Headers.Location));
-        Assert.Contains("href=\"/servers\"", html, StringComparison.Ordinal);
         Assert.Contains(
-            "name=\"ReturnUrl\" value=\"/servers\"",
+            "验证已通过，接下来的 5 分钟内可执行敏感操作。",
             html,
             StringComparison.Ordinal);
+        Assert.Contains("服务器资产", html, StringComparison.Ordinal);
         Assert.DoesNotContain("attacker.example", html, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(externalMarker, html, StringComparison.Ordinal);
     }

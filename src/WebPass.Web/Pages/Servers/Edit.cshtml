@@ -8,6 +8,11 @@
         .Where(message => !string.IsNullOrWhiteSpace(message))
         .ToArray() ?? [];
     var currentStatus = UiLabels.ForAliveStatus(Model.CurrentSnapshot?.AliveStatus);
+    var aliveStatusOptions = Enum
+        .GetValues<WebPass.Web.Domain.Enums.AliveStatus>()
+        .Select(status => new Microsoft.AspNetCore.Mvc.Rendering.SelectListItem(
+            UiLabels.ForAliveStatus(status),
+            ((int)status).ToString(System.Globalization.CultureInfo.InvariantCulture)));
 }
 
 <header class="page-header">
@@ -73,7 +78,7 @@ else if (modelErrors.Length > 0)
             </div>
             <div>
                 <label asp-for="Input.AliveStatus">状态</label>
-                <select asp-for="Input.AliveStatus" asp-items="Html.GetEnumSelectList<WebPass.Web.Domain.Enums.AliveStatus>()"></select>
+                <select asp-for="Input.AliveStatus" asp-items="aliveStatusOptions"></select>
                 <span asp-validation-for="Input.AliveStatus"></span>
             </div>
             <div>

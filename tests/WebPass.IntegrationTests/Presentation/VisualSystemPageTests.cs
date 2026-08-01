@@ -982,6 +982,61 @@ public sealed class VisualSystemPageTests
             StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Mobile_styles_keep_no_script_navigation_visible_and_scope_off_canvas_controls_to_enhanced_pages()
+    {
+        using var factory = new PresentationFactory();
+        factory.InitializeUser(
+            false,
+            PermissionCode.AssetView,
+            PermissionCode.SubnetManage,
+            PermissionCode.ImportData,
+            PermissionCode.ExportData,
+            PermissionCode.AuditView);
+        using var client = factory.CreateAuthenticatedClient();
+
+        var html = await client.GetStringAsync("/servers");
+        var css = await client.GetStringAsync("/css/site.css");
+        var mobileStart = css.IndexOf(
+            "@media (max-width: 767px)",
+            StringComparison.Ordinal);
+        var reducedMotionStart = css.IndexOf(
+            "@media (prefers-reduced-motion: reduce)",
+            mobileStart,
+            StringComparison.Ordinal);
+        Assert.InRange(mobileStart, 0, css.Length - 1);
+        Assert.InRange(reducedMotionStart, mobileStart + 1, css.Length - 1);
+        var mobileCss = css[mobileStart..reducedMotionStart];
+        var sidebarTag = Regex.Match(
+            html,
+            "<aside[^>]*id=\"app-sidebar\"[^>]*>",
+            RegexOptions.Singleline).Value;
+        var baselineSidebar = Regex.Match(
+            mobileCss,
+            "(?ms)^\\s*\\.app-sidebar\\s*\\{(?<rules>.*?)^\\s*\\}")
+            .Groups["rules"].Value;
+        var enhancedSidebar = Regex.Match(
+            mobileCss,
+            "(?ms)^\\s*html\\[data-js-enabled\\] \\.app-sidebar\\s*\\{(?<rules>.*?)^\\s*\\}")
+            .Groups["rules"].Value;
+        var enhancedToggle = Regex.Match(
+            mobileCss,
+            "(?ms)^\\s*html\\[data-js-enabled\\] \\.sidebar-close,\\s*^\\s*html\\[data-js-enabled\\] \\.nav-toggle\\s*\\{(?<rules>.*?)^\\s*\\}")
+            .Groups["rules"].Value;
+
+        Assert.DoesNotContain("aria-hidden", sidebarTag, StringComparison.OrdinalIgnoreCase);
+        var navigation = Regex.Match(
+            html,
+            "<nav[^>]*class=\"primary-nav\"[^>]*>.*?</nav>",
+            RegexOptions.Singleline).Value;
+        Assert.True(Regex.Matches(navigation, "<a\\s").Count >= 5);
+        Assert.DoesNotContain("visibility: hidden", baselineSidebar, StringComparison.Ordinal);
+        Assert.DoesNotContain("translateX", baselineSidebar, StringComparison.Ordinal);
+        Assert.Contains("visibility: hidden", enhancedSidebar, StringComparison.Ordinal);
+        Assert.Contains("translateX", enhancedSidebar, StringComparison.Ordinal);
+        Assert.Contains("display: inline-flex", enhancedToggle, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("enhancement-marker")]
     [InlineData("preopened-focus")]
