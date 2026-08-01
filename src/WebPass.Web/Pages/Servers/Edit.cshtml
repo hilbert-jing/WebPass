@@ -1,4 +1,5 @@
 @page "/servers/{id:guid?}/edit"
+@using WebPass.Web.Presentation
 @model WebPass.Web.Pages.Servers.EditModel
 @{
     ViewData["Title"] = "编辑服务器";
@@ -6,13 +7,7 @@
         .Select(error => error.ErrorMessage)
         .Where(message => !string.IsNullOrWhiteSpace(message))
         .ToArray() ?? [];
-    var currentStatus = Model.CurrentSnapshot?.AliveStatus switch
-    {
-        WebPass.Web.Domain.Enums.AliveStatus.Alive => "存活",
-        WebPass.Web.Domain.Enums.AliveStatus.Fault => "故障",
-        WebPass.Web.Domain.Enums.AliveStatus.Decommissioned => "已下线",
-        _ => "未知",
-    };
+    var currentStatus = UiLabels.ForAliveStatus(Model.CurrentSnapshot?.AliveStatus);
 }
 
 <header class="page-header">

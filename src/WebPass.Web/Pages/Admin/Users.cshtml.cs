@@ -33,11 +33,20 @@ public sealed class UsersModel(
     {
         await EnsureAdministratorAsync(ct);
         var normalizedUsername = username?.Trim() ?? string.Empty;
-        if (normalizedUsername.Length is < 1 or > 128)
+        if (normalizedUsername.Length < 1)
         {
             ModelState.AddModelError(
                 "username",
-                "Username must contain 1 to 128 characters.");
+                "请输入用户名。");
+            await LoadAsync(ct);
+            return Page();
+        }
+
+        if (normalizedUsername.Length > 128)
+        {
+            ModelState.AddModelError(
+                "username",
+                "用户名不能超过 128 个字符。");
             await LoadAsync(ct);
             return Page();
         }
@@ -48,7 +57,7 @@ public sealed class UsersModel(
         {
             ModelState.AddModelError(
                 "username",
-                "Username already exists.");
+                "该用户名已存在，请使用其他用户名。");
             await LoadAsync(ct);
             return Page();
         }
@@ -81,7 +90,7 @@ public sealed class UsersModel(
             db.Entry(user).State = EntityState.Detached;
             ModelState.AddModelError(
                 "username",
-                "Username already exists.");
+                "该用户名已存在，请使用其他用户名。");
             await LoadAsync(ct);
             return Page();
         }
@@ -104,7 +113,7 @@ public sealed class UsersModel(
             await transaction.CommitAsync(ct);
         }
 
-        TempData["StatusMessage"] = $"已创建用户 {user.Username}。";
+        TempData["StatusMessage"] = "已创建用户。";
         return RedirectToPage();
     }
 
@@ -160,7 +169,7 @@ public sealed class UsersModel(
         }
 
         TempData["StatusMessage"] =
-            $"用户 {user.Username} 的密码已重置为系统预设初始密码。";
+            "用户密码已重置为系统预设初始密码。";
         return RedirectToPage();
     }
 
@@ -190,7 +199,7 @@ public sealed class UsersModel(
             Payload: new Dictionary<string, object?> { ["beforeEnabled"] = before, ["afterEnabled"] = isEnabled }), ct);
         if (transaction is not null) await transaction.CommitAsync(ct);
         TempData["StatusMessage"] =
-            $"已{(isEnabled ? "启用" : "禁用")}用户 {user.Username}。";
+            $"已{(isEnabled ? "启用" : "禁用")}用户。";
         return RedirectToPage();
     }
 
@@ -218,8 +227,7 @@ public sealed class UsersModel(
             Payload: new Dictionary<string, object?> { ["beforePermissions"] = before, ["afterPermissions"] = requested.Order().ToArray() }), ct);
         if (transaction is not null)
             await transaction.CommitAsync(ct);
-        TempData["StatusMessage"] =
-            $"已更新用户 {user.Username} 的权限。";
+        TempData["StatusMessage"] = "已更新用户权限。";
         return RedirectToPage();
     }
 

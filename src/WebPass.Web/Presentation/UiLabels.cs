@@ -37,4 +37,56 @@ public static class UiLabels
         "PermissionDenied" => "权限不足",
         _ => "检测失败",
     };
+
+    public static string ForAuditAction(string? action) => action switch
+    {
+        "AssetCreate" => "登记服务器",
+        "AssetEdit" => "编辑服务器",
+        "AssetArchive" => "归档服务器",
+        "AdministratorPasswordExport" => "导出服务器密码",
+        "AssetExport" => "导出服务器资产",
+        "ImportCommit" => "提交数据导入",
+        "PingExecute" => "执行 Ping 检测",
+        "StatusMarkAlive" => "标记服务器为存活",
+        "DataKeyRotate" => "轮换数据加密密钥",
+        "SecretReauthentication" => "验证当前密码",
+        "SecretReveal" => "查看服务器密码",
+        "SubnetCreate" => "创建网段",
+        "SubnetEdit" => "编辑网段",
+        "SubnetEnable" => "启用网段",
+        "SubnetDisable" => "停用网段",
+        "SubnetDelete" => "删除网段",
+        "Login" => "登录",
+        "Logout" => "退出登录",
+        "UserCreate" => "创建用户",
+        "UserPasswordReset" => "重置用户密码",
+        "UserEnablement" => "更改用户状态",
+        "UserPermissionsReplace" => "更新用户权限",
+        _ => "未知操作",
+    };
+
+    public static string ForAuditObjectType(string? objectType) => objectType switch
+    {
+        "ServerAsset" => "服务器资产",
+        "ImportJob" => "导入任务",
+        "DataEncryptionKey" => "数据加密密钥",
+        "User" => "用户",
+        "Subnet" => "网段",
+        _ => "未知对象",
+    };
+
+    public static string ForAuditResult(string? result) => result switch
+    {
+        "Success" => "成功",
+        "Denied" => "已拒绝",
+        "Failure" => "失败",
+        "Timeout" => "超时",
+        "Unreachable" => "不可达",
+        "InternalError" => "系统处理失败",
+        "NotFound" => "未找到",
+        "InvalidCredentials" => "用户名或密码不正确",
+        "Locked" => "账号已锁定",
+        "Disabled" => "账号已停用",
+        _ => "未知结果",
+    };
 }

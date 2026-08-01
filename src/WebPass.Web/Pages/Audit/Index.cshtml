@@ -1,4 +1,5 @@
 @page "/audit"
+@using WebPass.Web.Presentation
 @model WebPass.Web.Pages.Audit.IndexModel
 @{
     ViewData["Title"] = "审计日志";
@@ -43,15 +44,15 @@
             <tr>
                 <td class="data-value">@entry.OccurredAt.ToString("yyyy-MM-dd HH:mm:ss zzz")</td>
                 <td class="data-value">@(entry.ActorUserId?.ToString() ?? "系统")</td>
-                <td>@entry.Action</td>
+                <td>@UiLabels.ForAuditAction(entry.Action)</td>
                 <td>
-                    @entry.ObjectType
+                    @UiLabels.ForAuditObjectType(entry.ObjectType)
                     @if (!string.IsNullOrWhiteSpace(entry.ObjectId))
                     {
                         <span class="data-value">@entry.ObjectId</span>
                     }
                 </td>
-                <td>@entry.Result</td>
+                <td>@UiLabels.ForAuditResult(entry.Result)</td>
                 <td>
                     @if (string.IsNullOrWhiteSpace(entry.CorrelationId))
                     {

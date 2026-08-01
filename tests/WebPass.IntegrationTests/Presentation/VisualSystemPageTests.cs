@@ -337,6 +337,13 @@ public sealed class VisualSystemPageTests
                 Result = "Success",
                 CorrelationId = "governance-42",
             });
+            db.AuditLogs.Add(new AuditLog
+            {
+                ActorUserId = factory.UserId,
+                Action = "UnexpectedAction42",
+                ObjectType = "UnexpectedObject42",
+                Result = "UnexpectedResult42",
+            });
             var userId = Guid.NewGuid();
             db.Users.Add(new AppUser
             {
@@ -374,6 +381,16 @@ public sealed class VisualSystemPageTests
             "aria-label=\"复制关联编号 governance-42\"",
             auditHtml,
             StringComparison.Ordinal);
+        Assert.Contains("更新用户权限", auditHtml, StringComparison.Ordinal);
+        Assert.Contains("用户", auditHtml, StringComparison.Ordinal);
+        Assert.Contains("成功", auditHtml, StringComparison.Ordinal);
+        Assert.Contains("未知操作", auditHtml, StringComparison.Ordinal);
+        Assert.Contains("未知对象", auditHtml, StringComparison.Ordinal);
+        Assert.Contains("未知结果", auditHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain("UserPermissionsReplace", auditHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain("UnexpectedAction42", auditHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain("UnexpectedObject42", auditHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain("UnexpectedResult42", auditHtml, StringComparison.Ordinal);
 
         Assert.Contains("用户与权限", usersHtml, StringComparison.Ordinal);
         Assert.Contains("创建普通用户", usersHtml, StringComparison.Ordinal);
@@ -446,6 +463,25 @@ public sealed class VisualSystemPageTests
             "请检查表单中标记的错误后重试。",
             invalidHtml,
             StringComparison.Ordinal);
+        var usernameField = WebUtility.HtmlDecode(Regex.Match(
+            invalidHtml,
+            "<div>\\s*<label for=\"username\".*?</div>",
+            RegexOptions.Singleline).Value);
+        Assert.Contains("aria-invalid=\"true\"", usernameField, StringComparison.Ordinal);
+        Assert.Contains(
+            "aria-describedby=\"username-error\"",
+            usernameField,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "id=\"username-error\"",
+            usernameField,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "用户名不能超过 128 个字符。",
+            usernameField,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("aria-live", usernameField, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("role=\"status\"", usernameField, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(" style=", invalidHtml, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(invalidUsername, invalidHtml, StringComparison.Ordinal);
         Assert.DoesNotContain("abc123", invalidHtml, StringComparison.Ordinal);

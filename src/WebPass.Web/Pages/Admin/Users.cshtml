@@ -5,6 +5,9 @@
     ViewData["Title"] = "用户与权限";
     var openCreation = Request.Method == "POST" &&
         string.Equals(Request.Query["handler"], "Create", StringComparison.OrdinalIgnoreCase);
+    var usernameError = ViewData.ModelState["username"]?.Errors
+        .Select(error => error.ErrorMessage)
+        .FirstOrDefault(message => !string.IsNullOrWhiteSpace(message));
 }
 
 <header class="page-header">
@@ -143,7 +146,13 @@
                    maxlength="128"
                    autocomplete="off"
                    data-drawer-initial-focus
+                   aria-invalid="@(usernameError is null ? null : "true")"
+                   aria-describedby="@(usernameError is null ? null : "username-error")"
                    required />
+            @if (usernameError is not null)
+            {
+                <span id="username-error" class="field-validation-error">@usernameError</span>
+            }
         </div>
         <button type="submit" data-submit-label="正在创建">创建用户</button>
     </form>

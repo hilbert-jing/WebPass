@@ -965,7 +965,8 @@ public sealed class AssetAndPingTests
         var current = WebUtility.HtmlDecode(HtmlRegion(conflictHtml, "section", "data-current-snapshot"));
         Assert.Contains("10.0.0.10", current, StringComparison.Ordinal);
         Assert.Contains("Current location", current, StringComparison.Ordinal);
-        Assert.Contains("故障", current, StringComparison.Ordinal);
+        Assert.Contains("异常", current, StringComparison.Ordinal);
+        Assert.DoesNotContain("Fault", current, StringComparison.Ordinal);
         Assert.Contains("current-computer", current, StringComparison.Ordinal);
         Assert.Contains("Current system", current, StringComparison.Ordinal);
         Assert.Contains("Current OS", current, StringComparison.Ordinal);

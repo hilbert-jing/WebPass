@@ -52,8 +52,12 @@ public sealed class AdminUsersTests
             audit.Details ?? string.Empty,
             StringComparison.Ordinal);
         Assert.Equal(
-            "已创建用户 operator。",
+            "已创建用户。",
             model.TempData["StatusMessage"]);
+        Assert.DoesNotContain(
+            created.Username,
+            model.TempData["StatusMessage"]?.ToString(),
+            StringComparison.Ordinal);
         Assert.DoesNotContain(
             "abc123",
             model.TempData["StatusMessage"]?.ToString(),
@@ -79,6 +83,9 @@ public sealed class AdminUsersTests
         var result = await model.OnPostCreateAsync(username, default);
 
         Assert.IsType<PageResult>(result);
+        Assert.Equal(
+            "请输入用户名。",
+            Assert.Single(model.ModelState["username"]!.Errors).ErrorMessage);
         Assert.Single(await db.Users.ToListAsync());
         Assert.Empty(await db.AuditLogs.ToListAsync());
     }
@@ -97,6 +104,9 @@ public sealed class AdminUsersTests
             default);
 
         Assert.IsType<PageResult>(result);
+        Assert.Equal(
+            "用户名不能超过 128 个字符。",
+            Assert.Single(model.ModelState["username"]!.Errors).ErrorMessage);
         Assert.Single(await db.Users.ToListAsync());
         Assert.Empty(await db.AuditLogs.ToListAsync());
     }
@@ -114,6 +124,9 @@ public sealed class AdminUsersTests
         var result = await model.OnPostCreateAsync(" operator ", default);
 
         Assert.IsType<PageResult>(result);
+        Assert.Equal(
+            "该用户名已存在，请使用其他用户名。",
+            Assert.Single(model.ModelState["username"]!.Errors).ErrorMessage);
         Assert.Equal(2, await db.Users.CountAsync());
         Assert.Empty(await db.AuditLogs.ToListAsync());
     }
@@ -188,8 +201,12 @@ public sealed class AdminUsersTests
             audit.Details ?? string.Empty,
             StringComparison.Ordinal);
         Assert.Equal(
-            "用户 operator 的密码已重置为系统预设初始密码。",
+            "用户密码已重置为系统预设初始密码。",
             model.TempData["StatusMessage"]);
+        Assert.DoesNotContain(
+            reset.Username,
+            model.TempData["StatusMessage"]?.ToString(),
+            StringComparison.Ordinal);
         Assert.DoesNotContain(
             "abc123",
             model.TempData["StatusMessage"]?.ToString(),
@@ -289,8 +306,12 @@ public sealed class AdminUsersTests
         Assert.DoesNotContain("PasswordHash", audit.Details, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("opaque-password-hash", audit.Details, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(
-            "已更新用户 operator 的权限。",
+            "已更新用户权限。",
             model.TempData["StatusMessage"]);
+        Assert.DoesNotContain(
+            operatorUser.Username,
+            model.TempData["StatusMessage"]?.ToString(),
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -348,8 +369,12 @@ public sealed class AdminUsersTests
         Assert.Contains("afterEnabled", audit.Details);
         Assert.DoesNotContain("PasswordHash", audit.Details, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(
-            "已禁用用户 operator。",
+            "已禁用用户。",
             model.TempData["StatusMessage"]);
+        Assert.DoesNotContain(
+            operatorUser.Username,
+            model.TempData["StatusMessage"]?.ToString(),
+            StringComparison.Ordinal);
     }
 
     private static UsersModel NewModel(WebPassDbContext db, Guid administratorId)
