@@ -57,17 +57,6 @@ public sealed class MigrationBundleTests(
     [Fact]
     public async Task Script_builds_bundle_and_bundle_applies_all_migrations()
     {
-        var repositoryRoot = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory,
-            "..",
-            "..",
-            "..",
-            "..",
-            ".."));
-        var script = Path.Combine(
-            repositoryRoot,
-            "scripts",
-            "Build-WebPassMigrationBundle.ps1");
         var temporaryDirectory = Path.Combine(
             Path.GetTempPath(),
             "WebPassMigrationBundleTests",
@@ -91,13 +80,27 @@ public sealed class MigrationBundleTests(
                 [
                     "-NoProfile",
                     "-File",
-                    script,
+                    Path.Combine(
+                        offlineKit.RepositoryRoot,
+                        "scripts",
+                        "Build-WebPassMigrationBundle.ps1"),
+                    "-OfflineKitPath",
+                    offlineKit.KitPath,
                     "-OutputPath",
                     bundle,
-                ]);
+                ],
+                timeout: TimeSpan.FromMinutes(10));
             Assert.True(
                 build.ExitCode == 0,
                 $"Bundle build failed.{Environment.NewLine}{build.Error}{Environment.NewLine}{build.Output}");
+            Assert.DoesNotContain(
+                "http://",
+                build.Output,
+                StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(
+                "https://",
+                build.Output,
+                StringComparison.OrdinalIgnoreCase);
             Assert.True(
                 File.Exists(bundle),
                 $"Bundle missing: {bundle}");
@@ -127,6 +130,208 @@ public sealed class MigrationBundleTests(
                     temporaryDirectory,
                     recursive: true);
             }
+        }
+    }
+
+    [Fact]
+    public async Task Offline_build_rejects_an_incomplete_kit_without_output()
+    {
+        var kit = await NewInvalidKitAsync(
+            offlineKit.RepositoryRoot,
+            _ => { });
+        var output = Path.Combine(kit, "output.exe");
+
+        try
+        {
+            var build = await RunBuildAsync(offlineKit.RepositoryRoot, kit, output);
+
+            Assert.NotEqual(0, build.ExitCode);
+            Assert.Contains(
+                "Offline migration kit file is missing:",
+                build.Error + build.Output,
+                StringComparison.Ordinal);
+            Assert.False(File.Exists(output));
+        }
+        finally
+        {
+            Directory.Delete(kit, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Offline_build_rejects_the_wrong_tool_version_without_output()
+    {
+        var kit = await NewInvalidKitAsync(
+            offlineKit.RepositoryRoot,
+            manifest => manifest["dotnetEfVersion"] = "9.0.0");
+        var output = Path.Combine(kit, "output.exe");
+        await File.WriteAllTextAsync(Path.Combine(
+            kit,
+            "tools",
+            "dotnet-ef.exe"), "not executed");
+
+        try
+        {
+            var build = await RunBuildAsync(offlineKit.RepositoryRoot, kit, output);
+
+            Assert.NotEqual(0, build.ExitCode);
+            Assert.Contains(
+                "Offline migration kit dotnet-ef version must be 10.0.0.",
+                build.Error + build.Output,
+                StringComparison.Ordinal);
+            Assert.False(File.Exists(output));
+        }
+        finally
+        {
+            Directory.Delete(kit, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Offline_build_rejects_a_source_commit_mismatch_without_output()
+    {
+        var kit = await NewInvalidKitAsync(
+            offlineKit.RepositoryRoot,
+            manifest => manifest["sourceCommit"] = new string('0', 40));
+        var output = Path.Combine(kit, "output.exe");
+        await File.WriteAllTextAsync(Path.Combine(
+            kit,
+            "tools",
+            "dotnet-ef.exe"), "not executed");
+
+        try
+        {
+            var build = await RunBuildAsync(offlineKit.RepositoryRoot, kit, output);
+
+            Assert.NotEqual(0, build.ExitCode);
+            Assert.Contains(
+                "Offline migration kit source commit does not match the current source.",
+                build.Error + build.Output,
+                StringComparison.Ordinal);
+            Assert.False(File.Exists(output));
+        }
+        finally
+        {
+            Directory.Delete(kit, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Offline_build_fails_on_missing_packages_without_http_fallback()
+    {
+        var kit = await NewInvalidKitAsync(
+            offlineKit.RepositoryRoot,
+            _ => { });
+        var output = Path.Combine(kit, "output.exe");
+        CopyDirectory(
+            Path.Combine(offlineKit.KitPath, "tools"),
+            Path.Combine(kit, "tools"));
+
+        try
+        {
+            var build = await RunBuildAsync(offlineKit.RepositoryRoot, kit, output);
+
+            Assert.NotEqual(0, build.ExitCode);
+            Assert.Contains(
+                "Offline restore failed with exit code",
+                build.Error + build.Output,
+                StringComparison.Ordinal);
+            Assert.False(File.Exists(output));
+            Assert.DoesNotContain(
+                "http://",
+                build.Output,
+                StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(
+                "https://",
+                build.Output,
+                StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(
+                "http://",
+                build.Error,
+                StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(
+                "https://",
+                build.Error,
+                StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(kit, recursive: true);
+        }
+    }
+
+    private static async Task<string> NewInvalidKitAsync(
+        string repositoryRoot,
+        Action<Dictionary<string, object?>> mutate)
+    {
+        var path = Path.Combine(
+            Path.GetTempPath(),
+            "WebPassInvalidMigrationKits",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(path, "tools"));
+        Directory.CreateDirectory(Path.Combine(path, "packages"));
+        Directory.CreateDirectory(Path.Combine(path, "feed"));
+        await File.WriteAllTextAsync(
+            Path.Combine(path, "NuGet.Config"),
+            "<configuration><packageSources><clear />" +
+            "<add key=\"WebPassOffline\" value=\"feed\" />" +
+            "</packageSources></configuration>");
+        var commit = (await MigrationOfflineKitFixture.RunAsync(
+            "git",
+            ["-C", repositoryRoot, "rev-parse", "HEAD"])).Output.Trim();
+        var manifest = new Dictionary<string, object?>
+        {
+            ["formatVersion"] = 1,
+            ["sourceCommit"] = commit,
+            ["dotnetEfVersion"] = "10.0.0",
+            ["sdkMajorVersion"] = 10,
+            ["targetRuntime"] = "win-x64",
+            ["createdAtUtc"] = DateTimeOffset.UtcNow,
+        };
+        mutate(manifest);
+        await File.WriteAllTextAsync(
+            Path.Combine(path, "manifest.json"),
+            JsonSerializer.Serialize(manifest));
+        return path;
+    }
+
+    private static Task<ProcessResult> RunBuildAsync(
+        string repositoryRoot,
+        string kit,
+        string output)
+    {
+        return MigrationOfflineKitFixture.RunAsync(
+            "powershell.exe",
+            [
+                "-NoProfile",
+                "-File",
+                Path.Combine(
+                    repositoryRoot,
+                    "scripts",
+                    "Build-WebPassMigrationBundle.ps1"),
+                "-OfflineKitPath",
+                kit,
+                "-OutputPath",
+                output,
+            ]);
+    }
+
+    private static void CopyDirectory(string source, string destination)
+    {
+        Directory.CreateDirectory(destination);
+        foreach (var file in Directory.EnumerateFiles(source))
+        {
+            File.Copy(
+                file,
+                Path.Combine(destination, Path.GetFileName(file)));
+        }
+        foreach (var directory in Directory.EnumerateDirectories(source))
+        {
+            var attributes = File.GetAttributes(directory);
+            Assert.False(attributes.HasFlag(FileAttributes.ReparsePoint));
+            CopyDirectory(
+                directory,
+                Path.Combine(destination, Path.GetFileName(directory)));
         }
     }
 }
