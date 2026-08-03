@@ -25,6 +25,18 @@
 
 ## 3. 发布和数据库迁移
 
+在可联网的 Windows 准备机上检出已审核的源代码提交，并制作离线依赖包：
+
+```powershell
+.\scripts\Prepare-WebPassMigrationOfflineKit.ps1 `
+  -OutputPath D:\WebPassTransfer\WebPassMigrationOfflineKit `
+  -Force
+```
+
+通过获准的移动介质或内网文件共享，将整个
+`WebPassMigrationOfflineKit` 目录复制到离线构建机。该目录属于构建材料，
+不是部署产物，不要将其复制到 IIS 服务器。
+
 从已审核的源提交发布到暂存目录：
 
 ```powershell
@@ -33,12 +45,18 @@ dotnet publish src\WebPass.Web -c Release -r win-x64 --self-contained false -o C
 
 确认 `C:\WebPass\staging\web.config` 存在。将生产连接字符串配置为位于 `localhost` 或 `localhost\SQLEXPRESS` 的数据库；不要使用局域网主机名或远程地址。使用数据加密证书（而不是 HTTPS 证书）的指纹配置 `SecretEncryption:CertificateThumbprint`。
 
-从同一审核源提交构建 migration bundle，并放入暂存目录：
+在离线构建机上，从与 `manifest.json` 记录的提交一致的源代码检出构建
+migration bundle，并放入暂存目录：
 
 ```powershell
 .\scripts\Build-WebPassMigrationBundle.ps1 `
+  -OfflineKitPath E:\WebPassMigrationOfflineKit `
   -OutputPath C:\WebPass\staging\WebPass.Migrations.exe
 ```
+
+离线构建机不需要访问 HTTP NuGet 源。任何缺失的依赖包都会终止构建和部署；
+不要替代依赖包，也不要从不同的源代码提交构建。IIS/部署服务器既不需要
+.NET SDK，也不需要 `dotnet-ef`；它仍需要 .NET 10 Hosting Bundle。
 
 使用可修改 WebPass 数据库的部署身份应用迁移：
 

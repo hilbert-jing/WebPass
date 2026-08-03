@@ -25,6 +25,20 @@ Follow [certificates-and-key-recovery.md](certificates-and-key-recovery.md) befo
 
 ## 3. Publish and database migration
 
+On an internet-connected Windows preparation machine, check out the reviewed
+source commit and create the offline dependency kit:
+
+```powershell
+.\scripts\Prepare-WebPassMigrationOfflineKit.ps1 `
+  -OutputPath D:\WebPassTransfer\WebPassMigrationOfflineKit `
+  -Force
+```
+
+Transfer the entire `WebPassMigrationOfflineKit` directory to the offline
+build machine through approved removable media or an internal file share. The
+kit is build material, not a deployment artifact, and must not be copied to
+the IIS server.
+
 From the reviewed source commit, publish to a staging directory:
 
 ```powershell
@@ -33,13 +47,21 @@ dotnet publish src\WebPass.Web -c Release -r win-x64 --self-contained false -o C
 
 Confirm `C:\WebPass\staging\web.config` exists. Configure the production connection string for a database on `localhost` or `localhost\SQLEXPRESS`; do not use a LAN hostname or remote address. Configure `SecretEncryption:CertificateThumbprint` with the data-encryption certificate thumbprint, not the HTTPS certificate thumbprint.
 
-Build the migration bundle from the same reviewed source commit and place it
-in the staging directory:
+On the offline build machine, build the migration bundle from a source
+checkout at the commit recorded in `manifest.json` and place it in the staging
+directory:
 
 ```powershell
 .\scripts\Build-WebPassMigrationBundle.ps1 `
+  -OfflineKitPath E:\WebPassMigrationOfflineKit `
   -OutputPath C:\WebPass\staging\WebPass.Migrations.exe
 ```
+
+The offline build machine does not require access to an HTTP NuGet source. A
+missing dependency stops the build and deployment; do not substitute packages
+or build from a different source commit. The IIS/deployment server requires
+neither the .NET SDK nor `dotnet-ef`; it retains the .NET 10 Hosting Bundle
+requirement.
 
 Apply migrations using a deployment identity that can alter the WebPass
 database:
