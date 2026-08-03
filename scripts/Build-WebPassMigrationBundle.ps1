@@ -31,7 +31,7 @@ function Assert-ReviewedSourceTree {
         throw 'The reviewed WebPass source changes could not be determined.'
     }
     $untracked = @(& git -C $repositoryRoot ls-files `
-        --others --exclude-standard -- @pathspecs)
+        --others -- @pathspecs)
     if ($LASTEXITCODE -ne 0) {
         throw 'The untracked WebPass source files could not be determined.'
     }
@@ -40,8 +40,17 @@ function Assert-ReviewedSourceTree {
         [System.IO.Path]::GetFullPath($_).TrimEnd('\')
     })
     $changes = @($tracked + $untracked | Where-Object {
+        $relativeSegments = @($_.Replace('\', '/') -split '/')
+        $isGeneratedProjectOutput =
+            $relativeSegments.Count -ge 3 -and
+            $relativeSegments[0].Equals(
+                'src',
+                [StringComparison]::OrdinalIgnoreCase) -and
+            ($relativeSegments -contains 'bin' -or
+                $relativeSegments -contains 'obj')
         $fullPath = [System.IO.Path]::GetFullPath(
             (Join-Path $repositoryRoot $_)).TrimEnd('\')
+        -not $isGeneratedProjectOutput -and
         -not ($normalizedExclusions | Where-Object {
             $fullPath.Equals($_, [StringComparison]::OrdinalIgnoreCase) -or
             $fullPath.StartsWith(
