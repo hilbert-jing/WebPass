@@ -220,10 +220,6 @@ try {
         }
         Move-Item -LiteralPath $staging -Destination $resolvedOutput
         $staging = $null
-        if ($backup -and (Test-Path -LiteralPath $backup)) {
-            Remove-Item -LiteralPath $backup -Recurse -Force
-            $backup = $null
-        }
     }
     catch {
         if ($backup -and (Test-Path -LiteralPath $backup)) {
@@ -234,6 +230,19 @@ try {
             $backup = $null
         }
         throw
+    }
+
+    if ($backup -and (Test-Path -LiteralPath $backup)) {
+        try {
+            Remove-Item -LiteralPath $backup -Recurse -Force
+        }
+        catch [System.IO.DirectoryNotFoundException] {
+            if (Test-Path -LiteralPath $backup) {
+                Remove-Item -LiteralPath $backup -Recurse -Force `
+                    -ErrorAction SilentlyContinue
+            }
+        }
+        $backup = $null
     }
 }
 finally {

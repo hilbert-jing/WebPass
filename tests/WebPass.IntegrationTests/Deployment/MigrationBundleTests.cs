@@ -55,6 +55,77 @@ public sealed class MigrationBundleTests(
     }
 
     [Fact]
+    public async Task Preparation_script_force_replaces_an_existing_long_path_kit()
+    {
+        var temporaryDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "WebPassMigrationOfflineKitReplacementTests",
+            Guid.NewGuid().ToString("N"));
+        var kitPath = Path.Combine(temporaryDirectory, "kit");
+        var longPackageDirectory = Path.Combine(
+            kitPath,
+            "packages",
+            "long-path-regression",
+            new string('a', 80),
+            new string('b', 80));
+        Directory.CreateDirectory(longPackageDirectory);
+        var longPackageFile = Path.Combine(
+            longPackageDirectory,
+            "Microsoft.AspNetCore.Authentication.Abstractions.dll");
+        await File.WriteAllTextAsync(longPackageFile, "obsolete");
+        Assert.True(longPackageFile.Length >= 260);
+        var sentinel = Path.Combine(kitPath, "old-kit.txt");
+        await File.WriteAllTextAsync(sentinel, "must not be restored");
+
+        try
+        {
+            var result = await MigrationOfflineKitFixture.RunAsync(
+                "powershell.exe",
+                [
+                    "-NoProfile",
+                    "-File",
+                    Path.Combine(
+                        offlineKit.RepositoryRoot,
+                        "scripts",
+                        "Prepare-WebPassMigrationOfflineKit.ps1"),
+                    "-OutputPath",
+                    kitPath,
+                    "-Force",
+                ],
+                timeout: TimeSpan.FromMinutes(25));
+
+            Assert.True(
+                result.ExitCode == 0,
+                $"Offline-kit replacement failed.{Environment.NewLine}" +
+                $"{result.Error}{Environment.NewLine}{result.Output}");
+            Assert.False(File.Exists(sentinel));
+            Assert.True(File.Exists(Path.Combine(
+                kitPath,
+                "manifest.json")));
+            Assert.True(File.Exists(Path.Combine(
+                kitPath,
+                "NuGet.Config")));
+            Assert.True(File.Exists(Path.Combine(
+                kitPath,
+                "tools",
+                "dotnet-ef.exe")));
+            Assert.NotEmpty(Directory.EnumerateDirectories(Path.Combine(
+                kitPath,
+                "packages")));
+            Assert.NotEmpty(Directory.EnumerateFiles(
+                Path.Combine(kitPath, "feed"),
+                "*.nupkg"));
+        }
+        finally
+        {
+            if (Directory.Exists(temporaryDirectory))
+            {
+                Directory.Delete(temporaryDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task Script_builds_bundle_and_bundle_applies_all_migrations()
     {
         var temporaryDirectory = Path.Combine(
