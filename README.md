@@ -92,6 +92,29 @@ dotnet tool install dotnet-ef --version 10.0.0 --tool-path .tools
 
 `.tools`、`bin` 和 `obj` 均被 Git 忽略。
 
+### 内网离线部署与 EF 工具准备
+
+.NET 10 SDK 不包含 `dotnet-ef`。生成 migration bundle 的开发或构建电脑需要
+额外安装与项目匹配的 `dotnet-ef` 10.0.0；已经生成 bundle 的测试服务器不需要
+安装 EF Core CLI，也不需要保留项目源码。
+
+推荐在能够访问 NuGet 或已准备完整离线 NuGet 源的开发/构建电脑生成以下产物：
+
+- `WebPass.Web` 的 `win-x64` 发布目录。
+- `WebPass.AdminInit` 的 `win-x64` 发布目录。
+- 与同一源代码版本对应的 `WebPass.Migrations.exe`。
+
+将这些产物复制到内网测试服务器后，服务器直接执行
+`WebPass.Migrations.exe --connection "..."`。如果 bundle 构建或执行失败，应停止部署，不得继续切换或启动 IIS。
+
+如果选择在内网服务器从源码构建，则除了 .NET 10 SDK 和 SQL Server 外，还必须
+离线准备 `dotnet-ef` 10.0.0、项目全部 NuGet 包及其传递依赖，以及可用的本地
+NuGet 源或已还原缓存。该方式准备内容更多，不是推荐部署路径。
+
+IIS 服务器还必须安装 .NET 10 Hosting Bundle。SDK 不能替代 Hosting Bundle 中的
+ASP.NET Core Module V2；应先安装 IIS，再安装或修复 Hosting Bundle。只要发布产物
+已在构建电脑生成，测试服务器通常无需安装 SDK。
+
 ## 配置
 
 默认配置位于 `src/WebPass.Web/appsettings.json`：
