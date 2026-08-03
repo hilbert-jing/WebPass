@@ -1,12 +1,59 @@
-using System.Diagnostics;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using WebPass.Web.Data;
 using Xunit;
 
 namespace WebPass.IntegrationTests.Deployment;
 
-public sealed class MigrationBundleTests
+[Collection(MigrationOfflineKitCollection.Name)]
+public sealed class MigrationBundleTests(
+    MigrationOfflineKitFixture offlineKit)
 {
+    [Fact]
+    public async Task Preparation_script_creates_a_valid_offline_kit()
+    {
+        Assert.True(File.Exists(Path.Combine(
+            offlineKit.KitPath,
+            "manifest.json")));
+        Assert.True(File.Exists(Path.Combine(
+            offlineKit.KitPath,
+            "NuGet.Config")));
+        Assert.True(File.Exists(Path.Combine(
+            offlineKit.KitPath,
+            "tools",
+            "dotnet-ef.exe")));
+        Assert.NotEmpty(Directory.EnumerateFiles(
+            Path.Combine(offlineKit.KitPath, "feed"),
+            "*.nupkg"));
+        Assert.NotEmpty(Directory.EnumerateDirectories(
+            Path.Combine(offlineKit.KitPath, "packages")));
+
+        using var manifest = JsonDocument.Parse(await File.ReadAllTextAsync(
+            Path.Combine(offlineKit.KitPath, "manifest.json")));
+        var root = manifest.RootElement;
+        Assert.Equal(1, root.GetProperty("formatVersion").GetInt32());
+        Assert.Equal(
+            "10.0.0",
+            root.GetProperty("dotnetEfVersion").GetString());
+        Assert.Equal(10, root.GetProperty("sdkMajorVersion").GetInt32());
+        Assert.Equal(
+            "win-x64",
+            root.GetProperty("targetRuntime").GetString());
+
+        var config = await File.ReadAllTextAsync(Path.Combine(
+            offlineKit.KitPath,
+            "NuGet.Config"));
+        Assert.Contains("<clear />", config, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "http://",
+            config,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(
+            "https://",
+            config,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public async Task Script_builds_bundle_and_bundle_applies_all_migrations()
     {
@@ -39,13 +86,15 @@ public sealed class MigrationBundleTests
 
         try
         {
-            var build = await RunAsync(
+            var build = await MigrationOfflineKitFixture.RunAsync(
                 "powershell.exe",
-                "-NoProfile",
-                "-File",
-                script,
-                "-OutputPath",
-                bundle);
+                [
+                    "-NoProfile",
+                    "-File",
+                    script,
+                    "-OutputPath",
+                    bundle,
+                ]);
             Assert.True(
                 build.ExitCode == 0,
                 $"Bundle build failed.{Environment.NewLine}{build.Error}{Environment.NewLine}{build.Output}");
@@ -53,10 +102,12 @@ public sealed class MigrationBundleTests
                 File.Exists(bundle),
                 $"Bundle missing: {bundle}");
 
-            var migrate = await RunAsync(
+            var migrate = await MigrationOfflineKitFixture.RunAsync(
                 bundle,
-                "--connection",
-                connection);
+                [
+                    "--connection",
+                    connection,
+                ]);
             Assert.True(
                 migrate.ExitCode == 0,
                 $"Bundle execution failed.{Environment.NewLine}{migrate.Error}{Environment.NewLine}{migrate.Output}");
@@ -78,39 +129,4 @@ public sealed class MigrationBundleTests
             }
         }
     }
-
-    private static async Task<ProcessResult> RunAsync(
-        string fileName,
-        params string[] arguments)
-    {
-        using var process = new Process
-        {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = fileName,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true,
-            },
-        };
-        foreach (var argument in arguments)
-        {
-            process.StartInfo.ArgumentList.Add(argument);
-        }
-
-        process.Start();
-        var output = process.StandardOutput.ReadToEndAsync();
-        var error = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-        return new(
-            process.ExitCode,
-            await output,
-            await error);
-    }
-
-    private sealed record ProcessResult(
-        int ExitCode,
-        string Output,
-        string Error);
 }
