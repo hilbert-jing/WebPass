@@ -14,9 +14,60 @@ $repositoryRoot = (Resolve-Path -LiteralPath (
 $webProject = Join-Path $repositoryRoot (
     'src\WebPass.Web\WebPass.Web.csproj')
 
+function Assert-ReviewedSourceTree {
+    param([string[]]$ExcludedPaths = @())
+
+    $pathspecs = @(
+        'src',
+        'WebPass.sln',
+        'global.json',
+        'Directory.Build.props',
+        'Directory.Build.targets',
+        'Directory.Packages.props',
+        'NuGet.Config')
+    $tracked = @(& git -C $repositoryRoot diff `
+        --name-only --no-renames HEAD -- @pathspecs)
+    if ($LASTEXITCODE -ne 0) {
+        throw 'The reviewed WebPass source changes could not be determined.'
+    }
+    $untracked = @(& git -C $repositoryRoot ls-files `
+        --others --exclude-standard -- @pathspecs)
+    if ($LASTEXITCODE -ne 0) {
+        throw 'The untracked WebPass source files could not be determined.'
+    }
+
+    $normalizedExclusions = @($ExcludedPaths | ForEach-Object {
+        [System.IO.Path]::GetFullPath($_).TrimEnd('\')
+    })
+    $changes = @($tracked + $untracked | Where-Object {
+        $fullPath = [System.IO.Path]::GetFullPath(
+            (Join-Path $repositoryRoot $_)).TrimEnd('\')
+        -not ($normalizedExclusions | Where-Object {
+            $fullPath.Equals($_, [StringComparison]::OrdinalIgnoreCase) -or
+            $fullPath.StartsWith(
+                $_ + '\',
+                [StringComparison]::OrdinalIgnoreCase)
+        })
+    } | Sort-Object -Unique)
+    if ($changes.Count -gt 0) {
+        throw "The WebPass source tree contains unreviewed changes: $($changes -join ', ')"
+    }
+}
+
 if (-not (Test-Path -LiteralPath $webProject -PathType Leaf)) {
     throw "WebPass project was not found: $webProject"
 }
+
+if ([string]::IsNullOrWhiteSpace($OutputPath)) {
+    $OutputPath = Join-Path $repositoryRoot (
+        'src\WebPass.Web\bin\Release\migrations\win-x64\WebPass.Migrations.exe')
+}
+elseif (-not [System.IO.Path]::IsPathRooted($OutputPath)) {
+    $OutputPath = Join-Path $repositoryRoot $OutputPath
+}
+
+$resolvedOutputPath = [System.IO.Path]::GetFullPath($OutputPath)
+Assert-ReviewedSourceTree -ExcludedPaths @($resolvedOutputPath)
 
 if ($OfflineKitPath) {
     $kit = (Resolve-Path -LiteralPath $OfflineKitPath).Path
@@ -70,15 +121,6 @@ else {
     }
 }
 
-if ([string]::IsNullOrWhiteSpace($OutputPath)) {
-    $OutputPath = Join-Path $repositoryRoot (
-        'src\WebPass.Web\bin\Release\migrations\win-x64\WebPass.Migrations.exe')
-}
-elseif (-not [System.IO.Path]::IsPathRooted($OutputPath)) {
-    $OutputPath = Join-Path $repositoryRoot $OutputPath
-}
-
-$resolvedOutputPath = [System.IO.Path]::GetFullPath($OutputPath)
 $outputDirectory = Split-Path -Parent $resolvedOutputPath
 New-Item -ItemType Directory -Path $outputDirectory -Force |
     Out-Null
@@ -99,11 +141,27 @@ function Publish-Bundle {
 
 if ($OfflineKitPath) {
     $oldPackages = $env:NUGET_PACKAGES
+    $oldFallbackPackages = $env:NUGET_FALLBACK_PACKAGES
     $oldRestoreSources = $env:RestoreSources
+    $oldRestoreConfigFile = $env:RestoreConfigFile
+    $oldRestorePackagesPath = $env:RestorePackagesPath
+    $oldRestoreFallbackFolders = $env:RestoreFallbackFolders
+    $oldAdditionalFallbackFolders =
+        $env:RestoreAdditionalProjectFallbackFolders
+    $oldAdditionalSources = $env:RestoreAdditionalProjectSources
+    $oldDisableImplicitFallback =
+        $env:DisableImplicitNuGetFallbackFolder
     $oldAudit = $env:NuGetAudit
     try {
         $env:NUGET_PACKAGES = $packages
+        $env:NUGET_FALLBACK_PACKAGES = ''
         $env:RestoreSources = $feed
+        $env:RestoreConfigFile = $configPath
+        $env:RestorePackagesPath = $packages
+        $env:RestoreFallbackFolders = ''
+        $env:RestoreAdditionalProjectFallbackFolders = ''
+        $env:RestoreAdditionalProjectSources = ''
+        $env:DisableImplicitNuGetFallbackFolder = 'true'
         $env:NuGetAudit = 'false'
         & dotnet restore $webProject `
             --runtime $TargetRuntime `
@@ -129,7 +187,16 @@ if ($OfflineKitPath) {
     }
     finally {
         $env:NUGET_PACKAGES = $oldPackages
+        $env:NUGET_FALLBACK_PACKAGES = $oldFallbackPackages
         $env:RestoreSources = $oldRestoreSources
+        $env:RestoreConfigFile = $oldRestoreConfigFile
+        $env:RestorePackagesPath = $oldRestorePackagesPath
+        $env:RestoreFallbackFolders = $oldRestoreFallbackFolders
+        $env:RestoreAdditionalProjectFallbackFolders =
+            $oldAdditionalFallbackFolders
+        $env:RestoreAdditionalProjectSources = $oldAdditionalSources
+        $env:DisableImplicitNuGetFallbackFolder =
+            $oldDisableImplicitFallback
         $env:NuGetAudit = $oldAudit
         if ($temporaryOutput -and
             (Test-Path -LiteralPath $temporaryOutput -PathType Leaf)) {

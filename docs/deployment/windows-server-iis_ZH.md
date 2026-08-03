@@ -37,28 +37,50 @@
 `WebPassMigrationOfflineKit` 目录复制到离线构建机。该目录属于构建材料，
 不是部署产物，不要将其复制到 IIS 服务器。
 
-从已审核的源提交发布到暂存目录：
+在离线构建机上，检出 `manifest.json` 记录的提交。仅使用已传输离线包中的
+`NuGet.Config`、本地 `feed` 和 `packages` 缓存还原网站，然后在不再次还原的
+情况下发布：
 
 ```powershell
-dotnet publish src\WebPass.Web -c Release -r win-x64 --self-contained false -o C:\WebPass\staging
+$kit = 'E:\WebPassMigrationOfflineKit'
+dotnet restore src\WebPass.Web\WebPass.Web.csproj `
+  --runtime win-x64 `
+  --configfile "$kit\NuGet.Config" `
+  --packages "$kit\packages" `
+  --no-http-cache `
+  -p:RestoreSources="$kit\feed" `
+  -p:RestoreFallbackFolders= `
+  -p:RestoreAdditionalProjectFallbackFolders= `
+  -p:DisableImplicitNuGetFallbackFolder=true `
+  -p:NuGetAudit=false
+dotnet publish src\WebPass.Web -c Release -r win-x64 `
+  --self-contained false `
+  --no-restore `
+  -o C:\WebPass\release-staging\website
 ```
 
-确认 `C:\WebPass\staging\web.config` 存在。将生产连接字符串配置为位于 `localhost` 或 `localhost\SQLEXPRESS` 的数据库；不要使用局域网主机名或远程地址。使用数据加密证书（而不是 HTTPS 证书）的指纹配置 `SecretEncryption:CertificateThumbprint`。
+确认 `C:\WebPass\release-staging\website\web.config` 存在。将生产连接字符串配置为位于 `localhost` 或 `localhost\SQLEXPRESS` 的数据库；不要使用局域网主机名或远程地址。使用数据加密证书（而不是 HTTPS 证书）的指纹配置 `SecretEncryption:CertificateThumbprint`。
 
-在离线构建机上，从与 `manifest.json` 记录的提交一致的源代码检出构建
-migration bundle，并放入暂存目录：
+在离线构建机上，从该提交构建 migration bundle，并将其放在网站暂存输出旁：
 
 ```powershell
 .\scripts\Build-WebPassMigrationBundle.ps1 `
   -OfflineKitPath E:\WebPassMigrationOfflineKit `
-  -OutputPath C:\WebPass\staging\WebPass.Migrations.exe
+  -OutputPath C:\WebPass\release-staging\WebPass.Migrations.exe
 ```
 
 离线构建机不需要访问 HTTP NuGet 源。任何缺失的依赖包都会终止构建和部署；
 不要替代依赖包，也不要从不同的源代码提交构建。IIS/部署服务器既不需要
 .NET SDK，也不需要 `dotnet-ef`；它仍需要 .NET 10 Hosting Bundle。
 
-使用可修改 WebPass 数据库的部署身份应用迁移：
+仅将 `C:\WebPass\release-staging\website` 的内容和单个
+`C:\WebPass\release-staging\WebPass.Migrations.exe` 文件传输到 IIS/部署服务器上的
+`C:\WebPass\staging`。不要传输源代码检出、离线依赖包、本地 feed、packages
+缓存或 `dotnet-ef`。继续之前，在 IIS 服务器上确认
+`C:\WebPass\staging\web.config` 和
+`C:\WebPass\staging\WebPass.Migrations.exe` 均存在。
+
+在 IIS/部署服务器上，使用可修改 WebPass 数据库的部署身份应用迁移：
 
 ```powershell
 C:\WebPass\staging\WebPass.Migrations.exe `

@@ -30,10 +30,104 @@ function Invoke-CheckedCommand {
     }
 }
 
+function Assert-ReviewedSourceTree {
+    param([string[]]$ExcludedPaths = @())
+
+    $pathspecs = @(
+        'src',
+        'WebPass.sln',
+        'global.json',
+        'Directory.Build.props',
+        'Directory.Build.targets',
+        'Directory.Packages.props',
+        'NuGet.Config')
+    $tracked = @(& git -C $repositoryRoot diff `
+        --name-only --no-renames HEAD -- @pathspecs)
+    if ($LASTEXITCODE -ne 0) {
+        throw 'The reviewed WebPass source changes could not be determined.'
+    }
+    $untracked = @(& git -C $repositoryRoot ls-files `
+        --others --exclude-standard -- @pathspecs)
+    if ($LASTEXITCODE -ne 0) {
+        throw 'The untracked WebPass source files could not be determined.'
+    }
+
+    $normalizedExclusions = @($ExcludedPaths | ForEach-Object {
+        [System.IO.Path]::GetFullPath($_).TrimEnd('\')
+    })
+    $changes = @($tracked + $untracked | Where-Object {
+        $fullPath = [System.IO.Path]::GetFullPath(
+            (Join-Path $repositoryRoot $_)).TrimEnd('\')
+        -not ($normalizedExclusions | Where-Object {
+            $fullPath.Equals($_, [StringComparison]::OrdinalIgnoreCase) -or
+            $fullPath.StartsWith(
+                $_ + '\',
+                [StringComparison]::OrdinalIgnoreCase)
+        })
+    } | Sort-Object -Unique)
+    if ($changes.Count -gt 0) {
+        throw "The WebPass source tree contains unreviewed changes: $($changes -join ', ')"
+    }
+}
+
 function Remove-StagingDrive {
     if ($script:stagingDrive) {
         & subst.exe $script:stagingDrive '/D'
         $script:stagingDrive = $null
+    }
+}
+
+function Remove-ExactDirectoryTree {
+    param([Parameter(Mandatory)][string]$LiteralPath)
+
+    if (-not (Test-Path -LiteralPath $LiteralPath)) {
+        return
+    }
+
+    $firstError = $null
+    $retryError = $null
+    try {
+        Remove-Item -LiteralPath $LiteralPath -Recurse -Force
+    }
+    catch {
+        $firstError = $_.Exception.Message
+    }
+
+    if (Test-Path -LiteralPath $LiteralPath) {
+        $parentPath = Split-Path -Parent $LiteralPath
+        $leafName = Split-Path -Leaf $LiteralPath
+        try {
+            foreach ($letter in [char[]](90..68)) {
+                $driveRoot = $letter + ':\'
+                if (Test-Path -LiteralPath $driveRoot) {
+                    continue
+                }
+
+                & subst.exe ($letter + ':') $parentPath
+                if ($LASTEXITCODE -eq 0) {
+                    $script:stagingDrive = $letter + ':'
+                    break
+                }
+            }
+            if (-not $script:stagingDrive) {
+                throw 'A temporary drive letter could not be allocated.'
+            }
+
+            $shortPath = Join-Path ($script:stagingDrive + '\') $leafName
+            Remove-Item -LiteralPath $shortPath -Recurse -Force
+        }
+        catch {
+            $retryError = $_.Exception.Message
+        }
+        finally {
+            Remove-StagingDrive
+        }
+    }
+
+    if (Test-Path -LiteralPath $LiteralPath) {
+        $details = @($firstError, $retryError) |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        throw "Exact directory cleanup failed: $LiteralPath. $($details -join ' ')"
     }
 }
 
@@ -58,6 +152,8 @@ if ($normalizedRepositoryRoot.Equals(
 if ((Test-Path -LiteralPath $resolvedOutput) -and -not $Force) {
     throw "Offline-kit output already exists: $resolvedOutput"
 }
+
+Assert-ReviewedSourceTree -ExcludedPaths @($resolvedOutput)
 
 $parent = Split-Path -Parent $resolvedOutput
 New-Item -ItemType Directory -Path $parent -Force | Out-Null
@@ -157,11 +253,27 @@ try {
     $packages = Join-Path $staging 'packages'
     $config = Join-Path $staging 'NuGet.Config'
     New-Item -ItemType Directory -Path $packages | Out-Null
+    $oldFallbackPackages = $env:NUGET_FALLBACK_PACKAGES
     $oldRestoreSources = $env:RestoreSources
+    $oldRestoreConfigFile = $env:RestoreConfigFile
+    $oldRestorePackagesPath = $env:RestorePackagesPath
+    $oldRestoreFallbackFolders = $env:RestoreFallbackFolders
+    $oldAdditionalFallbackFolders =
+        $env:RestoreAdditionalProjectFallbackFolders
+    $oldAdditionalSources = $env:RestoreAdditionalProjectSources
+    $oldDisableImplicitFallback =
+        $env:DisableImplicitNuGetFallbackFolder
     $oldAudit = $env:NuGetAudit
     try {
         $env:NUGET_PACKAGES = $workingPackages
+        $env:NUGET_FALLBACK_PACKAGES = ''
         $env:RestoreSources = $feed
+        $env:RestoreConfigFile = $config
+        $env:RestorePackagesPath = $workingPackages
+        $env:RestoreFallbackFolders = ''
+        $env:RestoreAdditionalProjectFallbackFolders = ''
+        $env:RestoreAdditionalProjectSources = ''
+        $env:DisableImplicitNuGetFallbackFolder = 'true'
         $env:NuGetAudit = 'false'
         Invoke-CheckedCommand dotnet @(
             'restore', $webProject,
@@ -180,7 +292,16 @@ try {
     }
     finally {
         $env:NUGET_PACKAGES = $oldPackages
+        $env:NUGET_FALLBACK_PACKAGES = $oldFallbackPackages
         $env:RestoreSources = $oldRestoreSources
+        $env:RestoreConfigFile = $oldRestoreConfigFile
+        $env:RestorePackagesPath = $oldRestorePackagesPath
+        $env:RestoreFallbackFolders = $oldRestoreFallbackFolders
+        $env:RestoreAdditionalProjectFallbackFolders =
+            $oldAdditionalFallbackFolders
+        $env:RestoreAdditionalProjectSources = $oldAdditionalSources
+        $env:DisableImplicitNuGetFallbackFolder =
+            $oldDisableImplicitFallback
         $env:NuGetAudit = $oldAudit
     }
 
@@ -234,13 +355,10 @@ try {
 
     if ($backup -and (Test-Path -LiteralPath $backup)) {
         try {
-            Remove-Item -LiteralPath $backup -Recurse -Force
+            Remove-ExactDirectoryTree -LiteralPath $backup
         }
-        catch [System.IO.DirectoryNotFoundException] {
-            if (Test-Path -LiteralPath $backup) {
-                Remove-Item -LiteralPath $backup -Recurse -Force `
-                    -ErrorAction SilentlyContinue
-            }
+        catch {
+            throw "Offline-kit publication succeeded, but backup cleanup failed: $backup. $($_.Exception.Message)"
         }
         $backup = $null
     }

@@ -39,22 +39,38 @@ build machine through approved removable media or an internal file share. The
 kit is build material, not a deployment artifact, and must not be copied to
 the IIS server.
 
-From the reviewed source commit, publish to a staging directory:
+On the offline build machine, check out the commit recorded in
+`manifest.json`. Restore the website using only the transferred kit's
+`NuGet.Config`, local `feed`, and `packages` cache, then publish without
+another restore:
 
 ```powershell
-dotnet publish src\WebPass.Web -c Release -r win-x64 --self-contained false -o C:\WebPass\staging
+$kit = 'E:\WebPassMigrationOfflineKit'
+dotnet restore src\WebPass.Web\WebPass.Web.csproj `
+  --runtime win-x64 `
+  --configfile "$kit\NuGet.Config" `
+  --packages "$kit\packages" `
+  --no-http-cache `
+  -p:RestoreSources="$kit\feed" `
+  -p:RestoreFallbackFolders= `
+  -p:RestoreAdditionalProjectFallbackFolders= `
+  -p:DisableImplicitNuGetFallbackFolder=true `
+  -p:NuGetAudit=false
+dotnet publish src\WebPass.Web -c Release -r win-x64 `
+  --self-contained false `
+  --no-restore `
+  -o C:\WebPass\release-staging\website
 ```
 
-Confirm `C:\WebPass\staging\web.config` exists. Configure the production connection string for a database on `localhost` or `localhost\SQLEXPRESS`; do not use a LAN hostname or remote address. Configure `SecretEncryption:CertificateThumbprint` with the data-encryption certificate thumbprint, not the HTTPS certificate thumbprint.
+Confirm `C:\WebPass\release-staging\website\web.config` exists. Configure the production connection string for a database on `localhost` or `localhost\SQLEXPRESS`; do not use a LAN hostname or remote address. Configure `SecretEncryption:CertificateThumbprint` with the data-encryption certificate thumbprint, not the HTTPS certificate thumbprint.
 
 On the offline build machine, build the migration bundle from a source
-checkout at the commit recorded in `manifest.json` and place it in the staging
-directory:
+checkout at that commit and place it beside the staged website output:
 
 ```powershell
 .\scripts\Build-WebPassMigrationBundle.ps1 `
   -OfflineKitPath E:\WebPassMigrationOfflineKit `
-  -OutputPath C:\WebPass\staging\WebPass.Migrations.exe
+  -OutputPath C:\WebPass\release-staging\WebPass.Migrations.exe
 ```
 
 The offline build machine does not require access to an HTTP NuGet source. A
@@ -63,8 +79,16 @@ or build from a different source commit. The IIS/deployment server requires
 neither the .NET SDK nor `dotnet-ef`; it retains the .NET 10 Hosting Bundle
 requirement.
 
-Apply migrations using a deployment identity that can alter the WebPass
-database:
+Transfer only the contents of
+`C:\WebPass\release-staging\website` and the single
+`C:\WebPass\release-staging\WebPass.Migrations.exe` file to
+`C:\WebPass\staging` on the IIS/deployment server. Do not transfer the source
+checkout, offline kit, local feed, package cache, or `dotnet-ef`. Confirm on
+the IIS server that both `C:\WebPass\staging\web.config` and
+`C:\WebPass\staging\WebPass.Migrations.exe` exist before continuing.
+
+On the IIS/deployment server, apply migrations using a deployment identity
+that can alter the WebPass database:
 
 ```powershell
 C:\WebPass\staging\WebPass.Migrations.exe `

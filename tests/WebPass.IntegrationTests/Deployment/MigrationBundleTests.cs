@@ -126,6 +126,117 @@ public sealed class MigrationBundleTests(
     }
 
     [Fact]
+    public async Task Preparation_script_rejects_an_unreviewed_source_file()
+    {
+        var sourceFile = Path.Combine(
+            offlineKit.RepositoryRoot,
+            "src",
+            "WebPass.Web",
+            $"UnreviewedMigrationSource{Guid.NewGuid():N}.cs");
+        var output = Path.Combine(
+            Path.GetTempPath(),
+            "WebPassUnreviewedPreparationTests",
+            Guid.NewGuid().ToString("N"),
+            "kit");
+        await File.WriteAllTextAsync(
+            sourceFile,
+            "namespace WebPass.Web; internal sealed class UnreviewedMigrationSource { }");
+
+        try
+        {
+            var result = await MigrationOfflineKitFixture.RunAsync(
+                "powershell.exe",
+                [
+                    "-NoProfile",
+                    "-File",
+                    Path.Combine(
+                        offlineKit.RepositoryRoot,
+                        "scripts",
+                        "Prepare-WebPassMigrationOfflineKit.ps1"),
+                    "-OutputPath",
+                    output,
+                ],
+                timeout: TimeSpan.FromSeconds(20));
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains(
+                "The WebPass source tree contains unreviewed changes:",
+                result.Error + result.Output,
+                StringComparison.Ordinal);
+            Assert.False(Directory.Exists(output));
+        }
+        finally
+        {
+            File.Delete(sourceFile);
+            var root = Directory.GetParent(output)?.FullName;
+            if (root is not null && Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Preparation_script_reports_a_published_kit_backup_that_cannot_be_removed()
+    {
+        var temporaryDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "WebPassMigrationOfflineKitCleanupTests",
+            Guid.NewGuid().ToString("N"));
+        var kitPath = Path.Combine(temporaryDirectory, "kit");
+        Directory.CreateDirectory(kitPath);
+        var lockedFile = Path.Combine(kitPath, "locked-old-kit.txt");
+        await File.WriteAllTextAsync(lockedFile, "old kit");
+
+        try
+        {
+            using (new FileStream(
+                lockedFile,
+                FileMode.Open,
+                FileAccess.ReadWrite,
+                FileShare.None))
+            {
+                var result = await MigrationOfflineKitFixture.RunAsync(
+                    "powershell.exe",
+                    [
+                        "-NoProfile",
+                        "-File",
+                        Path.Combine(
+                            offlineKit.RepositoryRoot,
+                            "scripts",
+                            "Prepare-WebPassMigrationOfflineKit.ps1"),
+                        "-OutputPath",
+                        kitPath,
+                        "-Force",
+                    ],
+                    timeout: TimeSpan.FromMinutes(25));
+
+                Assert.NotEqual(0, result.ExitCode);
+                Assert.Contains(
+                    "Offline-kit publication succeeded, but backup cleanup failed:",
+                    result.Error + result.Output,
+                    StringComparison.Ordinal);
+                Assert.True(File.Exists(Path.Combine(kitPath, "manifest.json")));
+                Assert.False(File.Exists(Path.Combine(kitPath, "locked-old-kit.txt")));
+                var backup = Assert.Single(Directory.EnumerateDirectories(
+                    temporaryDirectory,
+                    ".webpass-offline-kit-backup-*"));
+                Assert.Contains(
+                    backup,
+                    result.Error + result.Output,
+                    StringComparison.OrdinalIgnoreCase);
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(temporaryDirectory))
+            {
+                Directory.Delete(temporaryDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task Script_builds_bundle_and_bundle_applies_all_migrations()
     {
         var temporaryDirectory = Path.Combine(
@@ -201,6 +312,42 @@ public sealed class MigrationBundleTests(
                     temporaryDirectory,
                     recursive: true);
             }
+        }
+    }
+
+    [Fact]
+    public async Task Offline_build_rejects_an_unreviewed_source_file()
+    {
+        var sourceFile = Path.Combine(
+            offlineKit.RepositoryRoot,
+            "src",
+            "WebPass.Web",
+            $"UnreviewedMigrationSource{Guid.NewGuid():N}.cs");
+        var output = Path.Combine(
+            Path.GetTempPath(),
+            $"WebPassUnreviewedBuild{Guid.NewGuid():N}.exe");
+        await File.WriteAllTextAsync(
+            sourceFile,
+            "namespace WebPass.Web; internal sealed class UnreviewedMigrationSource { }");
+
+        try
+        {
+            var build = await RunBuildAsync(
+                offlineKit.RepositoryRoot,
+                offlineKit.KitPath,
+                output);
+
+            Assert.NotEqual(0, build.ExitCode);
+            Assert.Contains(
+                "The WebPass source tree contains unreviewed changes:",
+                build.Error + build.Output,
+                StringComparison.Ordinal);
+            Assert.False(File.Exists(output));
+        }
+        finally
+        {
+            File.Delete(sourceFile);
+            File.Delete(output);
         }
     }
 
@@ -331,6 +478,44 @@ public sealed class MigrationBundleTests(
         }
     }
 
+    [Fact]
+    public async Task Offline_build_rejects_packages_available_only_from_machine_fallback()
+    {
+        var kit = await NewInvalidKitAsync(
+            offlineKit.RepositoryRoot,
+            _ => { });
+        var output = Path.Combine(kit, "output.exe");
+        CopyDirectory(
+            Path.Combine(offlineKit.KitPath, "tools"),
+            Path.Combine(kit, "tools"));
+        var machineFallback = Path.Combine(offlineKit.KitPath, "packages");
+
+        try
+        {
+            var build = await RunBuildAsync(
+                offlineKit.RepositoryRoot,
+                kit,
+                output,
+                new Dictionary<string, string?>
+                {
+                    ["NUGET_FALLBACK_PACKAGES"] = machineFallback,
+                    ["RestoreFallbackFolders"] = machineFallback,
+                    ["RestoreAdditionalProjectFallbackFolders"] = machineFallback,
+                });
+
+            Assert.NotEqual(0, build.ExitCode);
+            Assert.Contains(
+                "Offline restore failed with exit code",
+                build.Error + build.Output,
+                StringComparison.Ordinal);
+            Assert.False(File.Exists(output));
+        }
+        finally
+        {
+            Directory.Delete(kit, recursive: true);
+        }
+    }
+
     private static async Task<string> NewInvalidKitAsync(
         string repositoryRoot,
         Action<Dictionary<string, object?>> mutate)
@@ -369,7 +554,8 @@ public sealed class MigrationBundleTests(
     private static Task<ProcessResult> RunBuildAsync(
         string repositoryRoot,
         string kit,
-        string output)
+        string output,
+        IReadOnlyDictionary<string, string?>? environment = null)
     {
         return MigrationOfflineKitFixture.RunAsync(
             "powershell.exe",
@@ -384,7 +570,8 @@ public sealed class MigrationBundleTests(
                 kit,
                 "-OutputPath",
                 output,
-            ]);
+            ],
+            environment);
     }
 
     private static void CopyDirectory(string source, string destination)
