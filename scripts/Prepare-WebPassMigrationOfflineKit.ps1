@@ -44,9 +44,14 @@ $resolvedOutput = [System.IO.Path]::GetFullPath(
     else {
         Join-Path $repositoryRoot $OutputPath
     }))
-$repositoryPrefix = $repositoryRoot.TrimEnd('\') + '\'
-if ($repositoryRoot.StartsWith(
-        $resolvedOutput.TrimEnd('\') + '\',
+$normalizedRepositoryRoot = $repositoryRoot.TrimEnd('\')
+$normalizedOutput = $resolvedOutput.TrimEnd('\')
+$repositoryPrefix = $normalizedRepositoryRoot + '\'
+if ($normalizedRepositoryRoot.Equals(
+        $normalizedOutput,
+        [StringComparison]::OrdinalIgnoreCase) -or
+    $repositoryPrefix.StartsWith(
+        $normalizedOutput + '\',
         [StringComparison]::OrdinalIgnoreCase)) {
     throw 'The offline-kit output cannot be the repository or its parent.'
 }

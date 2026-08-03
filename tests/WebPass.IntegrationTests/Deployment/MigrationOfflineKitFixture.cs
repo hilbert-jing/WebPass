@@ -142,3 +142,34 @@ public sealed record ProcessResult(
     int ExitCode,
     string Output,
     string Error);
+
+public sealed class MigrationOfflineKitPreparationScriptTests
+{
+    [Fact]
+    public async Task Preparation_script_rejects_repository_root_before_mutation()
+    {
+        var fixture = new MigrationOfflineKitFixture();
+        var result = await MigrationOfflineKitFixture.RunAsync(
+            "powershell.exe",
+            [
+                "-NoProfile",
+                "-File",
+                Path.Combine(
+                    fixture.RepositoryRoot,
+                    "scripts",
+                    "Prepare-WebPassMigrationOfflineKit.ps1"),
+                "-OutputPath",
+                fixture.RepositoryRoot,
+                "-Force",
+            ]);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains(
+            "The offline-kit output cannot be the repository or its parent.",
+            result.Error + result.Output,
+            StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Combine(
+            fixture.RepositoryRoot,
+            "WebPass.sln")));
+    }
+}
