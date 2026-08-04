@@ -117,8 +117,6 @@ function Remove-ExactDirectoryTree {
     }
 
     if (Test-Path -LiteralPath $LiteralPath) {
-        $parentPath = Split-Path -Parent $LiteralPath
-        $leafName = Split-Path -Leaf $LiteralPath
         try {
             foreach ($letter in [char[]](90..68)) {
                 $driveRoot = $letter + ':\'
@@ -126,7 +124,7 @@ function Remove-ExactDirectoryTree {
                     continue
                 }
 
-                & subst.exe ($letter + ':') $parentPath
+                & subst.exe ($letter + ':') $LiteralPath
                 if ($LASTEXITCODE -eq 0) {
                     $script:stagingDrive = $letter + ':'
                     break
@@ -136,14 +134,27 @@ function Remove-ExactDirectoryTree {
                 throw 'A temporary drive letter could not be allocated.'
             }
 
-            $shortPath = Join-Path ($script:stagingDrive + '\') $leafName
-            Remove-Item -LiteralPath $shortPath -Recurse -Force
+            $shortRoot = $script:stagingDrive + '\'
+            Get-ChildItem -LiteralPath $shortRoot -Force |
+                ForEach-Object {
+                    Remove-Item -LiteralPath $_.FullName -Recurse -Force
+                }
         }
         catch {
             $retryError = $_.Exception.Message
         }
         finally {
             Remove-StagingDrive
+        }
+    }
+
+    if ((Test-Path -LiteralPath $LiteralPath) -and
+        [string]::IsNullOrWhiteSpace($retryError)) {
+        try {
+            Remove-Item -LiteralPath $LiteralPath -Force
+        }
+        catch {
+            $retryError = $_.Exception.Message
         }
     }
 

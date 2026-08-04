@@ -1,3 +1,6 @@
+using System.Runtime.Versioning;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using WebPass.Web.Data;
@@ -177,6 +180,7 @@ public sealed class MigrationBundleTests(
     }
 
     [Fact]
+    [SupportedOSPlatform("windows")]
     public async Task Preparation_script_reports_a_published_kit_backup_that_cannot_be_removed()
     {
         var temporaryDirectory = Path.Combine(
@@ -184,51 +188,87 @@ public sealed class MigrationBundleTests(
             "WebPassMigrationOfflineKitCleanupTests",
             Guid.NewGuid().ToString("N"));
         var kitPath = Path.Combine(temporaryDirectory, "kit");
-        Directory.CreateDirectory(kitPath);
-        var lockedFile = Path.Combine(kitPath, "locked-old-kit.txt");
-        await File.WriteAllTextAsync(lockedFile, "old kit");
+        var protectedDirectory = Path.Combine(
+            kitPath,
+            "protected-old-kit");
+        Directory.CreateDirectory(protectedDirectory);
+        await File.WriteAllTextAsync(
+            Path.Combine(protectedDirectory, "old-kit.txt"),
+            "old kit");
+        var identity = WindowsIdentity.GetCurrent().User!;
+        var denyDelete = new FileSystemAccessRule(
+            identity,
+            FileSystemRights.Delete |
+                FileSystemRights.DeleteSubdirectoriesAndFiles,
+            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+            PropagationFlags.None,
+            AccessControlType.Deny);
+        var protectedInfo = new DirectoryInfo(protectedDirectory);
+        var protectedAcl = protectedInfo.GetAccessControl();
+        protectedAcl.AddAccessRule(denyDelete);
+        protectedInfo.SetAccessControl(protectedAcl);
+        string? backup = null;
 
         try
         {
-            using (new FileStream(
-                lockedFile,
-                FileMode.Open,
-                FileAccess.ReadWrite,
-                FileShare.None))
-            {
-                var result = await MigrationOfflineKitFixture.RunAsync(
-                    "powershell.exe",
-                    [
-                        "-NoProfile",
-                        "-File",
-                        Path.Combine(
-                            offlineKit.RepositoryRoot,
-                            "scripts",
-                            "Prepare-WebPassMigrationOfflineKit.ps1"),
-                        "-OutputPath",
-                        kitPath,
-                        "-Force",
-                    ],
-                    timeout: TimeSpan.FromMinutes(25));
+            var result = await MigrationOfflineKitFixture.RunAsync(
+                "powershell.exe",
+                [
+                    "-NoProfile",
+                    "-File",
+                    Path.Combine(
+                        offlineKit.RepositoryRoot,
+                        "scripts",
+                        "Prepare-WebPassMigrationOfflineKit.ps1"),
+                    "-OutputPath",
+                    kitPath,
+                    "-Force",
+                ],
+                timeout: TimeSpan.FromMinutes(25));
 
-                Assert.NotEqual(0, result.ExitCode);
-                Assert.Contains(
-                    "Offline-kit publication succeeded, but backup cleanup failed:",
-                    result.Error + result.Output,
-                    StringComparison.Ordinal);
-                Assert.True(File.Exists(Path.Combine(kitPath, "manifest.json")));
-                Assert.False(File.Exists(Path.Combine(kitPath, "locked-old-kit.txt")));
-                var backup = Assert.Single(Directory.EnumerateDirectories(
-                    temporaryDirectory,
-                    ".webpass-offline-kit-backup-*"));
-                Assert.Contains(
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Contains(
+                "Offline-kit publication succeeded, but backup cleanup failed:",
+                result.Error + result.Output,
+                StringComparison.Ordinal);
+            Assert.True(File.Exists(Path.Combine(kitPath, "manifest.json")));
+            Assert.False(Directory.Exists(Path.Combine(
+                kitPath,
+                "protected-old-kit")));
+            backup = Assert.Single(Directory.EnumerateDirectories(
+                temporaryDirectory,
+                ".webpass-offline-kit-backup-*"));
+            var normalizedError = result.Error.ReplaceLineEndings(
+                string.Empty);
+            Assert.True(
+                normalizedError.Contains(
                     backup,
-                    result.Error + result.Output,
-                    StringComparison.OrdinalIgnoreCase);
-            }
+                    StringComparison.OrdinalIgnoreCase),
+                $"Expected backup path: {backup}{Environment.NewLine}" +
+                $"Process error:{Environment.NewLine}{result.Error}" +
+                $"Process output:{Environment.NewLine}{result.Output}");
         }
         finally
         {
+            backup ??= Directory.Exists(temporaryDirectory)
+                ? Directory.EnumerateDirectories(
+                    temporaryDirectory,
+                    ".webpass-offline-kit-backup-*").SingleOrDefault()
+                : null;
+            var protectedBackup = backup is null
+                ? null
+                : Path.Combine(backup, "protected-old-kit");
+            var protectedCleanup = protectedBackup is not null &&
+                Directory.Exists(protectedBackup)
+                    ? protectedBackup
+                    : protectedDirectory;
+            if (Directory.Exists(protectedCleanup))
+            {
+                var cleanupInfo = new DirectoryInfo(protectedCleanup);
+                var cleanupAcl = cleanupInfo.GetAccessControl();
+                cleanupAcl.RemoveAccessRuleSpecific(denyDelete);
+                cleanupInfo.SetAccessControl(cleanupAcl);
+            }
             if (Directory.Exists(temporaryDirectory))
             {
                 Directory.Delete(temporaryDirectory, recursive: true);
