@@ -96,3 +96,38 @@ seconds.
 - Tests exercise both real scripts, prove the source is ignored before
   invocation, restore exclude state in `finally`, and clean temporary source,
   shim, kit, and bundle paths.
+
+## Scoped-review continuation: nested output segments
+
+A scoped review found that the initial explicit filter treated any `bin` or
+`obj` segment below `src` as generated output. An SDK-compiled file such as
+`src/WebPass.Web/Application/bin/Injected.cs` could therefore still evade the
+guard.
+
+Two additional real-script regressions now place a unique source file below
+`src/WebPass.Web/Application/bin`, hide its exact path with the current
+worktree's `.git/info/exclude`, prove the ignore rule with `git check-ignore`,
+and verify rejection by the bundle and preparation scripts. The same byte-for-
+byte exclude restoration and explicit `finally` cleanup apply.
+
+The generated-output allowlist is now derived only from tracked `.csproj`
+files returned by `git ls-files -- src`. For each tracked project, only the
+case-insensitive repository-relative prefixes `<project-root>/bin/` and
+`<project-root>/obj/` are allowed. A nested directory named `bin` or `obj` is
+not allowed unless that directory is directly below another tracked project
+root. Git ignore configuration remains unused for untracked enumeration.
+
+### Continuation TDD evidence
+
+- RED: the two nested-bin tests ran and both failed. The preparation script
+  bypassed the guard and reached the shim SDK `0.0.0`; the bundle script
+  bypassed the guard and reached the deliberately missing kit. Reported test
+  time: 18.2834 seconds.
+- GREEN: after deriving output prefixes from tracked project roots, the two
+  nested-bin tests ran with `--no-build --no-restore`; 2 passed, 0 failed.
+  Reported test time: 14.6142 seconds.
+- The no-restore build immediately before GREEN succeeded with 0 warnings and
+  0 errors.
+- A subsequent five-test focused command was externally interrupted after 8.2
+  seconds and produced no result; it is not represented as verification
+  evidence.

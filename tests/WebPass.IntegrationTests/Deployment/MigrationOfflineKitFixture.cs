@@ -186,6 +186,31 @@ public sealed class MigrationSourceGuardTests
     [Fact]
     public async Task Bundle_script_rejects_an_ignored_sdk_compiled_source_file()
     {
+        await AssertBundleScriptRejectsAsync("src/WebPass.Web");
+    }
+
+    [Fact]
+    public async Task Bundle_script_rejects_an_ignored_source_file_in_nested_bin()
+    {
+        await AssertBundleScriptRejectsAsync("src/WebPass.Web/Application/bin");
+    }
+
+    [Fact]
+    public async Task Preparation_script_rejects_an_ignored_sdk_compiled_source_file()
+    {
+        await AssertPreparationScriptRejectsAsync("src/WebPass.Web");
+    }
+
+    [Fact]
+    public async Task Preparation_script_rejects_an_ignored_source_file_in_nested_bin()
+    {
+        await AssertPreparationScriptRejectsAsync(
+            "src/WebPass.Web/Application/bin");
+    }
+
+    private static async Task AssertBundleScriptRejectsAsync(
+        string relativeSourceDirectory)
+    {
         var fixture = new MigrationOfflineKitFixture();
         var output = Path.Combine(
             Path.GetTempPath(),
@@ -201,7 +226,8 @@ public sealed class MigrationSourceGuardTests
                     Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")),
                     "-OutputPath",
                     output,
-                ]);
+                ],
+                relativeSourceDirectory);
 
             Assert.False(File.Exists(output));
         }
@@ -211,8 +237,8 @@ public sealed class MigrationSourceGuardTests
         }
     }
 
-    [Fact]
-    public async Task Preparation_script_rejects_an_ignored_sdk_compiled_source_file()
+    private static async Task AssertPreparationScriptRejectsAsync(
+        string relativeSourceDirectory)
     {
         var fixture = new MigrationOfflineKitFixture();
         var temporaryDirectory = Path.Combine(
@@ -232,6 +258,7 @@ public sealed class MigrationSourceGuardTests
                 fixture.RepositoryRoot,
                 "Prepare-WebPassMigrationOfflineKit.ps1",
                 ["-OutputPath", output],
+                relativeSourceDirectory,
                 new Dictionary<string, string?>
                 {
                     ["PATH"] = shimDirectory + Path.PathSeparator +
@@ -253,13 +280,17 @@ public sealed class MigrationSourceGuardTests
         string repositoryRoot,
         string scriptName,
         IReadOnlyList<string> scriptArguments,
+        string relativeSourceDirectory,
         IReadOnlyDictionary<string, string?>? environment = null)
     {
+        var sourceId = Guid.NewGuid().ToString("N")[..12];
         var relativeSource =
-            $"src/WebPass.Web/Injected{Guid.NewGuid():N}.cs";
+            $"{relativeSourceDirectory}/Injected{sourceId}.cs";
         var sourceFile = Path.Combine(
             repositoryRoot,
             relativeSource.Replace('/', Path.DirectorySeparatorChar));
+        var sourceDirectory = Path.GetDirectoryName(sourceFile)!;
+        var sourceDirectoryExisted = Directory.Exists(sourceDirectory);
         var gitPath = await MigrationOfflineKitFixture.RunAsync(
             "git",
             ["-C", repositoryRoot, "rev-parse", "--git-path", "info/exclude"]);
@@ -281,6 +312,7 @@ public sealed class MigrationSourceGuardTests
             await File.AppendAllTextAsync(
                 excludeFile,
                 $"{Environment.NewLine}/{relativeSource}{Environment.NewLine}");
+            Directory.CreateDirectory(sourceDirectory);
             await File.WriteAllTextAsync(
                 sourceFile,
                 "namespace WebPass.Web; internal sealed class Injected { }");
@@ -316,6 +348,10 @@ public sealed class MigrationSourceGuardTests
         finally
         {
             File.Delete(sourceFile);
+            if (!sourceDirectoryExisted && Directory.Exists(sourceDirectory))
+            {
+                Directory.Delete(sourceDirectory, recursive: false);
+            }
             if (excludeExisted)
             {
                 await File.WriteAllBytesAsync(excludeFile, originalExclude!);

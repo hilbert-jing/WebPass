@@ -51,19 +51,33 @@ function Assert-ReviewedSourceTree {
     if ($LASTEXITCODE -ne 0) {
         throw 'The untracked WebPass source files could not be determined.'
     }
+    $trackedProjects = @(& git -C $repositoryRoot ls-files -- 'src' |
+        Where-Object {
+            [System.IO.Path]::GetExtension($_).Equals(
+                '.csproj',
+                [StringComparison]::OrdinalIgnoreCase)
+        })
+    if ($LASTEXITCODE -ne 0) {
+        throw 'The tracked WebPass projects could not be determined.'
+    }
+    $generatedProjectOutputPrefixes = @($trackedProjects | ForEach-Object {
+        $projectRoot = [System.IO.Path]::GetDirectoryName($_).
+            Replace('\', '/').TrimEnd('/')
+        $projectRoot + '/bin/'
+        $projectRoot + '/obj/'
+    } | Sort-Object -Unique)
 
     $normalizedExclusions = @($ExcludedPaths | ForEach-Object {
         [System.IO.Path]::GetFullPath($_).TrimEnd('\')
     })
     $changes = @($tracked + $untracked | Where-Object {
-        $relativeSegments = @($_.Replace('\', '/') -split '/')
-        $isGeneratedProjectOutput =
-            $relativeSegments.Count -ge 3 -and
-            $relativeSegments[0].Equals(
-                'src',
-                [StringComparison]::OrdinalIgnoreCase) -and
-            ($relativeSegments -contains 'bin' -or
-                $relativeSegments -contains 'obj')
+        $relativePath = $_.Replace('\', '/')
+        $isGeneratedProjectOutput = @(
+            $generatedProjectOutputPrefixes | Where-Object {
+                $relativePath.StartsWith(
+                    $_,
+                    [StringComparison]::OrdinalIgnoreCase)
+            }).Count -gt 0
         $fullPath = [System.IO.Path]::GetFullPath(
             (Join-Path $repositoryRoot $_)).TrimEnd('\')
         -not $isGeneratedProjectOutput -and
