@@ -557,4 +557,3 @@ GO
 `LocalMachine\My`，确认具有 RSA 私钥，再使用本发布版本的
 `Initialize-WebPass.ps1` 恢复 `IIS AppPool\WebPass` 的私钥读取权限。新建一张
 证书不能解封旧数据密钥；如果原私钥和 PFX 恢复副本同时丢失，现有加密密码无法恢复。
-
