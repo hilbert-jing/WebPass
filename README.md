@@ -92,29 +92,6 @@ dotnet tool install dotnet-ef --version 10.0.0 --tool-path .tools
 
 `.tools`、`bin` 和 `obj` 均被 Git 忽略。
 
-### 内网离线部署与 EF 工具准备
-
-.NET 10 SDK 不包含 `dotnet-ef`。生成 migration bundle 的开发或构建电脑需要
-额外安装与项目匹配的 `dotnet-ef` 10.0.0；已经生成 bundle 的测试服务器不需要
-安装 EF Core CLI，也不需要保留项目源码。
-
-推荐在能够访问 NuGet 或已准备完整离线 NuGet 源的开发/构建电脑生成以下产物：
-
-- `WebPass.Web` 的 `win-x64` 发布目录。
-- `WebPass.AdminInit` 的 `win-x64` 发布目录。
-- 与同一源代码版本对应的 `WebPass.Migrations.exe`。
-
-将这些产物复制到内网测试服务器后，服务器直接执行
-`WebPass.Migrations.exe --connection "..."`。如果 bundle 构建或执行失败，应停止部署，不得继续切换或启动 IIS。
-
-如果选择在内网服务器从源码构建，则除了 .NET 10 SDK 和 SQL Server 外，还必须
-离线准备 `dotnet-ef` 10.0.0、项目全部 NuGet 包及其传递依赖，以及可用的本地
-NuGet 源或已还原缓存。该方式准备内容更多，不是推荐部署路径。
-
-IIS 服务器还必须安装 .NET 10 Hosting Bundle。SDK 不能替代 Hosting Bundle 中的
-ASP.NET Core Module V2；应先安装 IIS，再安装或修复 Hosting Bundle。只要发布产物
-已在构建电脑生成，测试服务器通常无需安装 SDK。
-
 ## 配置
 
 默认配置位于 `src/WebPass.Web/appsettings.json`：
@@ -142,8 +119,7 @@ $env:ConnectionStrings__WebPass = 'Server=localhost\SQLEXPRESS;Database=WebPass;
 $env:SecretEncryption__CertificateThumbprint = '<data-encryption-certificate-thumbprint>'
 ```
 
-HTTPS 证书和数据加密证书必须分开。数据加密证书的创建、权限和离线 PFX 恢复副本要求见
-[证书与密钥恢复说明](docs/deployment/certificates-and-key-recovery_ZH.md)。
+生产环境必须使用独立的 HTTPS 证书和数据加密证书；生产值、证书权限和恢复要求统一见下方生产部署入口。
 
 ## 初始化本地数据库
 
@@ -213,92 +189,9 @@ dotnet test WebPass.sln -c Release
 git diff --check
 ```
 
-## Windows Server 发布摘要
+## 生产部署
 
-以下内容只作为流程入口。正式部署必须遵循
-[Windows Server 与 IIS 部署手册](docs/deployment/windows-server-iis_ZH.md)。
-
-### 1. 准备服务器
-
-按顺序安装：
-
-1. IIS。
-2. .NET 10 Hosting Bundle；如果先于 IIS 安装，安装 IIS 后修复 Hosting Bundle。
-3. 本机 SQL Server 2025 Express。
-4. HTTPS 证书和独立的数据加密证书。
-
-SQL Server 不应向局域网开放。生产网站使用独立、低权限的 IIS 应用池身份。
-
-### 2. 发布网站
-
-```powershell
-dotnet publish src\WebPass.Web -c Release -r win-x64 `
-  --self-contained false -o C:\WebPass\staging
-```
-
-确认输出中存在 `web.config`。
-
-### 3. 生成并执行 migration bundle
-
-bundle 必须从与网站相同的审核源代码版本生成：
-
-```powershell
-.\scripts\Build-WebPassMigrationBundle.ps1 `
-  -OutputPath C:\WebPass\staging\WebPass.Migrations.exe
-```
-
-使用具备数据库结构修改权限的部署身份执行：
-
-```powershell
-C:\WebPass\staging\WebPass.Migrations.exe `
-  --connection "Server=localhost\SQLEXPRESS;Database=WebPass;Integrated Security=True;TrustServerCertificate=True"
-```
-
-bundle 生成或执行失败时必须停止部署，不得继续切换或启动 IIS。运行中的网站不会自动
-应用迁移，IIS 应用池身份也不应保留数据库结构修改权限。
-
-### 4. 初始化 IIS
-
-先预览脚本操作：
-
-```powershell
-.\scripts\Initialize-WebPass.ps1 `
-  -PublishPath C:\WebPass\staging `
-  -HttpsCertificateThumbprint '<HTTPS thumbprint>' `
-  -DataEncryptionCertificateThumbprint '<data certificate thumbprint>' `
-  -ListenAddress 10.20.30.40 `
-  -LanRemoteAddress @('10.20.0.0/16') `
-  -WhatIf
-```
-
-核对站点、应用池、证书、ACL 和防火墙范围后，再移除 `-WhatIf` 执行。
-
-### 5. 创建管理员
-
-```powershell
-dotnet publish src\WebPass.AdminInit -c Release -r win-x64 `
-  --self-contained false -o C:\WebPass\AdminInit
-
-C:\WebPass\AdminInit\WebPass.AdminInit.exe `
-  --connection-string "Server=localhost\SQLEXPRESS;Database=WebPass;Integrated Security=True;TrustServerCertificate=True" `
-  --username admin
-```
-
-管理员创建完成后，可以删除服务器上的 `C:\WebPass\AdminInit` 目录。
-
-### 6. 验收
-
-必须从受信任的局域网客户端验证：
-
-- 浏览器没有任何证书警告。
-- Windows 防火墙只允许批准的局域网 CIDR。
-- IIS 只有 HTTPS 绑定。
-- SQL Server 不能从局域网客户端访问。
-- `/health` 只返回应用和数据库可用性。
-- 登录、权限、密码查看、导入、导出和审计符合预期。
-- Windows Server 重启后 SQL Server、IIS 和应用自动恢复。
-
-使用[生产验收记录](docs/deployment/acceptance-test-record_ZH.md)保存证据。
+唯一生产路径见 [DEPLOYMENT.md](DEPLOYMENT.md)。README 不再重复生产命令，以避免出现第二条部署路线。
 
 ## 安全与运维注意事项
 
@@ -326,10 +219,11 @@ WebPass/
 │  └─ WebPass.IntegrationTests/    Web、EF Core 和 SQL Server 集成测试
 ├─ scripts/
 │  ├─ Build-WebPassMigrationBundle.ps1
-│  └─ Initialize-WebPass.ps1
+│  ├─ Initialize-WebPass.ps1
+│  └─ Prepare-WebPassMigrationOfflineKit.ps1
 ├─ docs/
-│  ├─ deployment/                  部署、证书恢复和验收文档
 │  └─ superpowers/                 设计规格和实施计划
+├─ DEPLOYMENT.md                   唯一生产部署手册
 └─ WebPass.sln
 ```
 
@@ -341,12 +235,6 @@ WebPass/
 - [安全导出与管理员密码导出设计](docs/superpowers/specs/2026-07-27-webpass-admin-password-export-design_ZH.md)
 - [初始管理员工具设计](docs/superpowers/specs/2026-07-29-webpass-initial-administrator-tool-design_ZH.md)
 - [用户管理、会话期限与 Migration Bundle 设计](docs/superpowers/specs/2026-07-29-webpass-user-session-migration-bundle-design.md)
-
-### 部署与运维
-
-- [Windows Server 与 IIS 部署](docs/deployment/windows-server-iis_ZH.md)
-- [证书与数据密钥恢复](docs/deployment/certificates-and-key-recovery_ZH.md)
-- [生产验收记录](docs/deployment/acceptance-test-record_ZH.md)
 
 ## 当前范围
 
