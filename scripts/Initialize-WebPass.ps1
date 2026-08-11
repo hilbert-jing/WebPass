@@ -188,4 +188,4 @@ Write-Host 'IIS initialization completed.'
 Write-Host "Application pool identity: $appPoolIdentity"
 Write-Host "Set SecretEncryption:CertificateThumbprint to $($dataCertificate.Thumbprint) in production configuration."
 Write-Host 'Verify SQL Server is local-only and grant the application-pool identity only required database permissions.'
-Write-Host 'Complete docs/deployment/acceptance-test-record.md from a trusted LAN client.'
+Write-Host 'Complete the verification section in DEPLOYMENT.md from a trusted LAN client.'
