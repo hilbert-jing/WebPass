@@ -37,7 +37,8 @@
    `Prepare-WebPassMigrationOfflineKit.ps1` 制作
    `WebPassMigrationOfflineKit`。
 2. 在离线 Windows 构建机上检出同一提交，仅使用该离线包完成还原，并生成
-   `win-x64` 网站、`WebPass.AdminInit.exe` 和 `WebPass.Migrations.exe`。
+   `win-x64` 网站、`WebPass.AdminInit.exe`、`WebPass.Migrations.exe`，以及用于
+   本次发布的 `Initialize-WebPass.ps1` 副本。
 3. 只把上述发布产物传输到 IIS 服务器。先以临时部署权限执行 migration bundle，
    再配置版本化发布目录、初始化或切换 IIS、启动站点，并分别在服务器和获准的
    局域网客户端完成验证。
@@ -98,8 +99,9 @@ IIS 服务器只保留 .NET 10 Hosting Bundle，不接收 .NET SDK、`dotnet-ef`
 ## 发布、启动与回滚约定
 
 每个已审核提交都生成独立发布目录，并传输到
-`C:\WebPass\releases\<commit>`。其中的 `site`、`admin` 和 migration bundle
-必须来自同一提交。执行迁移前必须完成 SQL Server 完整备份。
+`C:\WebPass\releases\<commit>`。其中的 `site`、`admin`、migration bundle 和
+`Initialize-WebPass.ps1` 必须来自同一提交。执行迁移前必须完成 SQL Server
+完整备份。
 
 首次部署由 `Initialize-WebPass.ps1` 创建专用应用程序池、仅 HTTPS 站点、证书
 私钥 ACL 和仅限局域网的防火墙规则。后续部署先停止站点，把 IIS 物理路径切换到
@@ -129,7 +131,7 @@ IIS 服务器本机运行，首次成功使用后删除。
   选定的三阶段路径；
 - 所有命令、文件路径、配置键、目标框架、运行时标识符、脚本参数和健康检查响应均与
   当前仓库一致；
-- 网站和管理员工具都在传输前由离线构建机生成；
+- 网站和管理员工具都在传输前由离线构建机生成，同时包含匹配的 IIS 初始化脚本；
 - 仍在使用的文档和脚本不再引用任何已删除部署文件；
 - IIS 初始化 PowerShell 脚本仍可通过语法解析；
 - Markdown 链接可解析，`git diff --check` 通过；若本地依赖缓存满足条件，现有解决方案
@@ -139,7 +141,7 @@ IIS 服务器本机运行，首次成功使用后删除。
 
 - 新操作人员只需遵循 `DEPLOYMENT.md`，即可完成环境准备、启动验证和回滚。
 - 说明不会要求在 IIS 服务器安装 SDK、保留源码、NuGet 包缓存或 `dotnet-ef`。
-- 网站、管理员工具和 migration bundle 明确来自同一个已审核提交。
+- 网站、管理员工具、migration bundle 和 IIS 初始化脚本明确来自同一个已审核提交。
 - 迁移结束后，运行时数据库身份只有数据读写权限。
 - 旧部署文档及仍在使用的文件中指向它们的链接全部删除。
 - `DEPLOYMENT.md` 不包含八个指定章节之外的其他顶层主题。

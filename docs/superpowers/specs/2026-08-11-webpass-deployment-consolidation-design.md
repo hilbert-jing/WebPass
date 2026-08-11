@@ -49,8 +49,9 @@ implemented and covered by deployment integration tests:
    and create `WebPassMigrationOfflineKit` with
    `Prepare-WebPassMigrationOfflineKit.ps1`.
 2. On an offline Windows build machine, check out the same commit, restore only
-   from that kit, and produce the website, `WebPass.AdminInit.exe`, and
-   `WebPass.Migrations.exe` for `win-x64`.
+   from that kit, and produce the website, `WebPass.AdminInit.exe`,
+   `WebPass.Migrations.exe`, and a release copy of
+   `Initialize-WebPass.ps1` for `win-x64` deployment.
 3. Transfer only those release artifacts to the IIS server. Apply the migration
    bundle with a temporary deployment privilege, configure a versioned release
    directory, initialize or switch IIS, start the site, and verify it from the
@@ -119,9 +120,9 @@ must not be placed in `SecretEncryption:CertificateThumbprint`.
 ## Release, Startup, and Rollback Contract
 
 Every reviewed commit will be built into a distinct directory and transferred
-to `C:\WebPass\releases\<commit>`. Its `site`, `admin`, and migration-bundle
-outputs must come from the same commit. A full SQL Server backup is required
-before migration.
+to `C:\WebPass\releases\<commit>`. Its `site`, `admin`, migration bundle, and
+`Initialize-WebPass.ps1` must come from the same commit. A full SQL Server
+backup is required before migration.
 
 For the first deployment, `Initialize-WebPass.ps1` creates the dedicated
 application pool, HTTPS-only site, certificate ACL, and LAN-scoped firewall
@@ -157,7 +158,8 @@ Verification will check that:
   order and names only the selected three-stage path;
 - every command, file path, configuration key, target framework, runtime
   identifier, script parameter, and health response matches the repository;
-- both website and administrator outputs are built offline before transfer;
+- the website and administrator outputs are built offline, and the matching
+  initialization script is included before transfer;
 - no tracked live document or script references a deleted deployment file;
 - the PowerShell initialization script still parses;
 - Markdown links resolve, `git diff --check` passes, and the existing solution
@@ -169,8 +171,8 @@ Verification will check that:
   through verified startup and rollback.
 - The instructions never require an SDK, source tree, NuGet package cache, or
   `dotnet-ef` on the IIS server.
-- The website, administrator utility, and migration bundle are demonstrably
-  tied to the same reviewed commit.
+- The website, administrator utility, migration bundle, and IIS initialization
+  script are demonstrably tied to the same reviewed commit.
 - Runtime database access is limited to data reads and writes after migration.
 - The old deployment document set and every live link to it are removed.
 - `DEPLOYMENT.md` contains no top-level subject outside the eight requested
