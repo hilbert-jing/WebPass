@@ -30,35 +30,15 @@ public sealed class PingService(
         var asset = await db.ServerAssets.Include(x => x.Subnet).SingleOrDefaultAsync(x => x.Id == assetId, ct)
             ?? throw new KeyNotFoundException("Server asset not found.");
         ValidateTarget(asset);
-        ConsumeRateAllowance(actorUserId);
-
-        var gate = ConcurrencyGates.GetOrAdd(options.Value.PingMaxConcurrency, static limit => new SemaphoreSlim(limit, limit));
-        await gate.WaitAsync(ct);
-        PingTransportResult response;
-        try
-        {
-            response = await transport.SendAsync(asset.BusinessIp, options.Value.PingTimeoutMilliseconds, ct);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch
-        {
-            response = new PingTransportResult("InternalError", null, "TransportError");
-        }
-        finally
-        {
-            gate.Release();
-        }
+        var probe = await ProbeAsync(asset.BusinessIp, actorUserId, ct);
 
         var result = new PingResult
         {
             ServerAssetId = asset.Id,
-            TargetIp = asset.BusinessIp,
-            Outcome = NormalizeOutcome(response.Outcome),
-            LatencyMilliseconds = response.LatencyMilliseconds,
-            ErrorCode = SafeErrorCode(response.ErrorCode),
+            TargetIp = probe.TargetIp,
+            Outcome = probe.Outcome,
+            LatencyMilliseconds = probe.LatencyMilliseconds,
+            ErrorCode = probe.ErrorCode,
             ExecutedBy = actorUserId,
         };
 
@@ -76,6 +56,48 @@ public sealed class PingService(
         if (transaction is not null) await transaction.CommitAsync(ct);
         return result;
     }
+    public async Task<PingProbeResult> ExecuteUnregisteredAsync(
+        Guid subnetId,
+        string targetIp,
+        Guid actorUserId,
+        CancellationToken ct)
+    {
+        await EnsureAllowedAsync(actorUserId, PermissionCode.PingExecute, ct);
+        var subnet = await db.Subnets.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Id == subnetId && x.IsEnabled, ct);
+        if (subnet is null ||
+            !IPAddress.TryParse(targetIp, out var address) ||
+            address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork ||
+            !string.Equals(targetIp, address.ToString(), StringComparison.Ordinal) ||
+            !Ipv4Cidr.Parse(subnet.Cidr).ContainsUsable(address) ||
+            await db.ServerAssets.AsNoTracking()
+                .AnyAsync(x => !x.IsArchived && x.BusinessIp == targetIp, ct))
+        {
+            throw new InvalidOperationException(
+                "The Ping target is not an unregistered address in an enabled subnet.");
+        }
+
+        var probe = await ProbeAsync(targetIp, actorUserId, ct);
+        await auditWriter.WriteAsync(
+            new AuditEntry(
+                actorUserId,
+                "PingUnregisteredAddress",
+                "SubnetAddress",
+                probe.TargetIp,
+                probe.Outcome,
+                null,
+                Payload: new Dictionary<string, object?>
+                {
+                    ["subnetId"] = subnet.Id,
+                    ["targetIp"] = probe.TargetIp,
+                    ["outcome"] = probe.Outcome,
+                    ["latencyMilliseconds"] = probe.LatencyMilliseconds,
+                    ["errorCode"] = probe.ErrorCode,
+                }),
+            ct);
+        return probe;
+    }
+
 
     public async Task MarkAliveAsync(Guid assetId, Guid actorUserId, byte[] rowVersion, CancellationToken ct)
     {
@@ -103,6 +125,47 @@ public sealed class PingService(
         await auditWriter.WriteAsync(new AuditEntry(actorUserId, "StatusMarkAlive", "ServerAsset", asset.Id.ToString(), "Success", null,
             Payload: new Dictionary<string, object?> { ["aliveStatus"] = asset.AliveStatus.ToString() }), ct);
         if (transaction is not null) await transaction.CommitAsync(ct);
+    }
+
+    private async Task<PingProbeResult> ProbeAsync(
+        string targetIp,
+        Guid actorUserId,
+        CancellationToken ct)
+    {
+        ConsumeRateAllowance(actorUserId);
+        var gate = ConcurrencyGates.GetOrAdd(
+            options.Value.PingMaxConcurrency,
+            static limit => new SemaphoreSlim(limit, limit));
+        await gate.WaitAsync(ct);
+        PingTransportResult response;
+        try
+        {
+            response = await transport.SendAsync(
+                targetIp,
+                options.Value.PingTimeoutMilliseconds,
+                ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            response = new PingTransportResult(
+                "InternalError",
+                null,
+                "TransportError");
+        }
+        finally
+        {
+            gate.Release();
+        }
+
+        return new PingProbeResult(
+            targetIp,
+            NormalizeOutcome(response.Outcome),
+            response.LatencyMilliseconds,
+            SafeErrorCode(response.ErrorCode));
     }
 
     private async Task EnsureAllowedAsync(Guid actorUserId, string permission, CancellationToken ct)

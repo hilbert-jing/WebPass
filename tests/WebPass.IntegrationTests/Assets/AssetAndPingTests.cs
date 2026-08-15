@@ -171,6 +171,185 @@ public sealed class AssetAndPingTests
     }
 
     [Fact]
+    public async Task Ping_unregistered_address_is_audited_without_persisting_asset_or_history()
+    {
+        await using var db = NewDatabase();
+        var actor = await AddUserAsync(db, PermissionCode.PingExecute);
+        var subnet = await AddEnabledSubnetAsync(db, "10.0.0.0/24");
+        var transport = new TrackingPingTransport("Success");
+        var options = Options.Create(new WebPassOptions
+        {
+            PingTimeoutMilliseconds = 1234,
+            PingMaxConcurrency = 2,
+            PingPerUserPerMinute = 5,
+        });
+        var ping = new PingService(
+            db,
+            new PermissionAuthorizationHandler(db),
+            new AuditWriter(db),
+            transport,
+            options);
+
+        var result = await ping.ExecuteUnregisteredAsync(
+            subnet.Id,
+            "10.0.0.9",
+            actor.Id,
+            default);
+
+        Assert.Equal("10.0.0.9", result.TargetIp);
+        Assert.Equal("Success", result.Outcome);
+        Assert.Equal(1, result.LatencyMilliseconds);
+        Assert.Equal("10.0.0.9", transport.LastTargetIp);
+        Assert.Equal(1234, transport.LastTimeoutMilliseconds);
+        Assert.Empty(await db.ServerAssets.ToListAsync());
+        Assert.Empty(await db.PingResults.ToListAsync());
+        var audit = Assert.Single(await db.AuditLogs.ToListAsync());
+        Assert.Equal("PingUnregisteredAddress", audit.Action);
+        Assert.Equal("SubnetAddress", audit.ObjectType);
+        Assert.Equal("10.0.0.9", audit.ObjectId);
+        Assert.Equal("Success", audit.Result);
+        Assert.Contains(subnet.Id.ToString(), audit.Details, StringComparison.Ordinal);
+        Assert.Contains("\"targetIp\":\"10.0.0.9\"", audit.Details, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Ping_unregistered_address_requires_ping_permission()
+    {
+        await using var db = NewDatabase();
+        var actor = await AddUserAsync(db);
+        var subnet = await AddEnabledSubnetAsync(db, "10.0.0.0/24");
+        var ping = NewPingService(db, new SuccessfulPingTransport());
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            ping.ExecuteUnregisteredAsync(subnet.Id, "10.0.0.9", actor.Id, default));
+
+        Assert.Empty(await db.PingResults.ToListAsync());
+        Assert.Empty(await db.AuditLogs.ToListAsync());
+    }
+
+    [Theory]
+    [InlineData("10.0.0.0")]
+    [InlineData("10.0.0.255")]
+    [InlineData("10.0.1.9")]
+    [InlineData("010.0.0.9")]
+    [InlineData("not-an-ip")]
+    public async Task Ping_unregistered_address_rejects_invalid_subnet_targets(string targetIp)
+    {
+        await using var db = NewDatabase();
+        var actor = await AddUserAsync(db, PermissionCode.PingExecute);
+        var subnet = await AddEnabledSubnetAsync(db, "10.0.0.0/24");
+        var ping = NewPingService(db, new SuccessfulPingTransport());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            ping.ExecuteUnregisteredAsync(subnet.Id, targetIp, actor.Id, default));
+
+        Assert.Empty(await db.PingResults.ToListAsync());
+        Assert.Empty(await db.AuditLogs.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Ping_unregistered_address_rejects_disabled_missing_and_registered_targets()
+    {
+        await using var db = NewDatabase();
+        var actor = await AddUserAsync(
+            db,
+            PermissionCode.AssetCreate,
+            PermissionCode.PingExecute);
+        var subnet = await AddEnabledSubnetAsync(db, "10.0.0.0/24");
+        var assets = NewAssetService(db);
+        await assets.CreateAsync(Input("10.0.0.9"), actor.Id, default);
+        var ping = NewPingService(db, new SuccessfulPingTransport());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            ping.ExecuteUnregisteredAsync(subnet.Id, "10.0.0.9", actor.Id, default));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            ping.ExecuteUnregisteredAsync(Guid.NewGuid(), "10.0.0.10", actor.Id, default));
+        subnet.IsEnabled = false;
+        await db.SaveChangesAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            ping.ExecuteUnregisteredAsync(subnet.Id, "10.0.0.10", actor.Id, default));
+
+        Assert.Empty(await db.PingResults.ToListAsync());
+        Assert.DoesNotContain(
+            await db.AuditLogs.ToListAsync(),
+            audit => audit.Action == "PingUnregisteredAddress");
+    }
+
+    [Fact]
+    public async Task Ping_registered_and_unregistered_share_the_per_user_allowance()
+    {
+        await using var db = NewDatabase();
+        var actor = await AddUserAsync(
+            db,
+            PermissionCode.AssetCreate,
+            PermissionCode.PingExecute);
+        var subnet = await AddEnabledSubnetAsync(db, "10.0.0.0/24");
+        var asset = await NewAssetService(db).CreateAsync(
+            Input("10.0.0.2"),
+            actor.Id,
+            default);
+        var ping = NewPingService(
+            db,
+            new SuccessfulPingTransport(),
+            perUserPerMinute: 1);
+
+        await ping.ExecuteUnregisteredAsync(
+            subnet.Id,
+            "10.0.0.1",
+            actor.Id,
+            default);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            ping.ExecuteAsync(asset.Id, actor.Id, default));
+
+        Assert.Empty(await db.PingResults.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Ping_registered_and_unregistered_share_the_global_concurrency_gate()
+    {
+        await using var db = NewDatabase();
+        var actor = await AddUserAsync(
+            db,
+            PermissionCode.AssetCreate,
+            PermissionCode.PingExecute);
+        var subnet = await AddEnabledSubnetAsync(db, "10.0.0.0/24");
+        var asset = await NewAssetService(db).CreateAsync(
+            Input("10.0.0.2"),
+            actor.Id,
+            default);
+        var transport = new TrackingPingTransport("Success");
+        var options = Options.Create(new WebPassOptions
+        {
+            PingTimeoutMilliseconds = 1000,
+            PingMaxConcurrency = 1,
+            PingPerUserPerMinute = 5,
+        });
+        var ping = new PingService(
+            db,
+            new PermissionAuthorizationHandler(db),
+            new AuditWriter(db),
+            transport,
+            options);
+
+        await Task.WhenAll(
+            ping.ExecuteAsync(asset.Id, actor.Id, default),
+            ping.ExecuteUnregisteredAsync(
+                subnet.Id,
+                "10.0.0.1",
+                actor.Id,
+                default));
+
+        Assert.Equal(1, transport.MaximumConcurrent);
+        Assert.Single(await db.PingResults.ToListAsync());
+        Assert.Contains(
+            await db.AuditLogs.ToListAsync(),
+            audit => audit.Action == "PingUnregisteredAddress");
+        Assert.Equal(
+            AliveStatus.Unknown,
+            (await db.ServerAssets.AsNoTracking().SingleAsync()).AliveStatus);
+    }
+
+    [Fact]
     public async Task Mark_alive_changes_only_manual_status_and_writes_an_audit_entry()
     {
         await using var db = NewDatabase();
@@ -1507,9 +1686,13 @@ public sealed class AssetAndPingTests
     {
         private int _current;
         public int MaximumConcurrent { get; private set; }
+        public string? LastTargetIp { get; private set; }
+        public int LastTimeoutMilliseconds { get; private set; }
 
         public async Task<PingTransportResult> SendAsync(string targetIp, int timeoutMilliseconds, CancellationToken ct)
         {
+            LastTargetIp = targetIp;
+            LastTimeoutMilliseconds = timeoutMilliseconds;
             var current = Interlocked.Increment(ref _current);
             MaximumConcurrent = Math.Max(MaximumConcurrent, current);
             try
