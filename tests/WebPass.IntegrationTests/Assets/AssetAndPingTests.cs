@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
@@ -307,7 +308,13 @@ public sealed class AssetAndPingTests
     [Fact]
     public async Task Ping_registered_and_unregistered_share_the_global_concurrency_gate()
     {
-        await using var db = NewDatabase();
+        var databaseOptions =
+            new DbContextOptionsBuilder<WebPassDbContext>()
+                .UseInMemoryDatabase(
+                    Guid.NewGuid().ToString(),
+                    new InMemoryDatabaseRoot())
+                .Options;
+        await using var db = new WebPassDbContext(databaseOptions);
         var actor = await AddUserAsync(
             db,
             PermissionCode.AssetCreate,
@@ -324,16 +331,24 @@ public sealed class AssetAndPingTests
             PingMaxConcurrency = 1,
             PingPerUserPerMinute = 5,
         });
-        var ping = new PingService(
-            db,
-            new PermissionAuthorizationHandler(db),
-            new AuditWriter(db),
+        await using var registeredDb = new WebPassDbContext(databaseOptions);
+        await using var unregisteredDb = new WebPassDbContext(databaseOptions);
+        var registeredPing = new PingService(
+            registeredDb,
+            new PermissionAuthorizationHandler(registeredDb),
+            new AuditWriter(registeredDb),
+            transport,
+            options);
+        var unregisteredPing = new PingService(
+            unregisteredDb,
+            new PermissionAuthorizationHandler(unregisteredDb),
+            new AuditWriter(unregisteredDb),
             transport,
             options);
 
         await Task.WhenAll(
-            ping.ExecuteAsync(asset.Id, actor.Id, default),
-            ping.ExecuteUnregisteredAsync(
+            registeredPing.ExecuteAsync(asset.Id, actor.Id, default),
+            unregisteredPing.ExecuteUnregisteredAsync(
                 subnet.Id,
                 "10.0.0.1",
                 actor.Id,
