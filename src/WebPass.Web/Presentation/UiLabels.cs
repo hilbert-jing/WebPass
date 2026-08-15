@@ -47,6 +47,7 @@ public static class UiLabels
         "AssetExport" => "导出服务器资产",
         "ImportCommit" => "提交数据导入",
         "PingExecute" => "执行 Ping 检测",
+        "PingUnregisteredAddress" => "探测空闲 IP",
         "StatusMarkAlive" => "标记服务器为存活",
         "DataKeyRotate" => "轮换数据加密密钥",
         "SecretReauthentication" => "验证当前密码",
@@ -72,6 +73,7 @@ public static class UiLabels
         "DataEncryptionKey" => "数据加密密钥",
         "User" => "用户",
         "Subnet" => "网段",
+        "SubnetAddress" => "子网地址",
         _ => "未知对象",
     };
 

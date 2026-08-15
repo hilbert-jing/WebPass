@@ -32,6 +32,7 @@ public sealed class IndexModel(
     public bool CanMarkAlive { get; private set; }
     public bool CanReveal { get; private set; }
     public ServerPingFeedback? PingFeedback { get; private set; }
+    public UnregisteredPingFeedback? FreeIpPingFeedback { get; private set; }
 
     [BindProperty(SupportsGet = true)]
     public ServerListQuery Query { get; set; } = new();
@@ -43,6 +44,7 @@ public sealed class IndexModel(
     {
         ClearRegistrationValidationState();
         PingFeedback = PingCommandWorkflow.TakeFeedback(TempData);
+        FreeIpPingFeedback = PingCommandWorkflow.TakeUnregisteredFeedback(TempData);
         await LoadAsync(ct);
     }
 
@@ -91,6 +93,29 @@ public sealed class IndexModel(
             feedback => RedirectToPage(
                 "/Servers/Index",
                 PingCommandWorkflow.TargetRouteValues(feedback)),
+            ct);
+    }
+
+    public async Task<IActionResult> OnPostPingFreeIpAsync(
+        Guid subnetId,
+        string targetIp,
+        CancellationToken ct)
+    {
+        ClearRegistrationValidationState();
+        NormalizeQuery();
+        if (!await AllowedAsync(PermissionCode.PingExecute, ct))
+            return Forbid();
+        return await PingCommandWorkflow.ExecuteUnregisteredAsync(
+            pingService,
+            subnetId,
+            targetIp,
+            UserId(),
+            TempData,
+            feedback => RedirectToPage(
+                "/Servers/Index",
+                PingCommandWorkflow.UnregisteredTargetRouteValues(
+                    feedback,
+                    Query.Take)),
             ct);
     }
 

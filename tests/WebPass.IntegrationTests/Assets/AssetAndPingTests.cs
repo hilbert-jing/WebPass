@@ -1095,6 +1095,115 @@ public sealed class AssetAndPingTests
     }
 
     [Fact]
+    public async Task Pool_free_row_shows_ping_before_registration_when_permissions_allow_both()
+    {
+        using var factory = new ServerPageFactory(
+            NewUser(),
+            PermissionCode.AssetView,
+            PermissionCode.PingExecute,
+            PermissionCode.AssetCreate);
+        factory.InitializeData();
+        await factory.AddSubnetAsync();
+        var subnet = await factory.GetOnlySubnetAsync();
+        using var client = factory.CreateAuthenticatedClient();
+
+        var html = await client.GetStringAsync(
+            $"/servers?Query.PoolMode=true&Query.SubnetId={subnet.Id}");
+        var row = FreeAddressRow(html, subnet.Id, "10.0.0.1");
+
+        Assert.Contains("handler=PingFreeIp", row, StringComparison.Ordinal);
+        Assert.Contains("name=\"subnetId\"", row, StringComparison.Ordinal);
+        Assert.Contains("value=\"10.0.0.1\"", row, StringComparison.Ordinal);
+        Assert.True(
+            row.IndexOf(">Ping<", StringComparison.Ordinal) <
+            row.IndexOf(">登记此 IP<", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Free_ip_ping_redirects_to_feedback_without_creating_asset_or_ping_history()
+    {
+        using var factory = new ServerPageFactory(
+            NewUser(),
+            PermissionCode.AssetView,
+            PermissionCode.PingExecute);
+        factory.InitializeData();
+        await factory.AddSubnetAsync();
+        var subnet = await factory.GetOnlySubnetAsync();
+        using var client = factory.CreateAuthenticatedClient();
+        var poolUrl = $"/servers?Query.PoolMode=true&Query.SubnetId={subnet.Id}&Query.Take=25";
+        var token = AntiforgeryToken(await client.GetStringAsync(poolUrl));
+
+        var response = await PostFreeIpPingAsync(
+            client,
+            "/servers?handler=PingFreeIp&Query.Take=25",
+            subnet.Id,
+            "10.0.0.1",
+            token);
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        var location = Uri.UnescapeDataString(response.Headers.Location!.OriginalString);
+        Assert.Contains($"Query.SubnetId={subnet.Id}", location, StringComparison.Ordinal);
+        Assert.Contains("Query.Search=10.0.0.1", location, StringComparison.Ordinal);
+        Assert.Contains("Query.PoolMode=True", location, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Query.Skip=0", location, StringComparison.Ordinal);
+        Assert.Contains("Query.Take=25", location, StringComparison.Ordinal);
+
+        var html = WebUtility.HtmlDecode(await client.GetStringAsync(response.Headers.Location));
+        var row = FreeAddressRow(html, subnet.Id, "10.0.0.1");
+        Assert.Contains("data-free-ip-ping-feedback", row, StringComparison.Ordinal);
+        Assert.Contains("Ping 可达 · 12 ms", row, StringComparison.Ordinal);
+        Assert.DoesNotContain("标记为存活", row, StringComparison.Ordinal);
+        Assert.Empty(await factory.GetAssetsAsync());
+        Assert.Equal(0, await factory.GetPingResultCountAsync());
+
+        var audit = Assert.Single(await factory.GetAuditLogsAsync());
+        Assert.Equal("PingUnregisteredAddress", audit.Action);
+        Assert.Equal("SubnetAddress", audit.ObjectType);
+        Assert.Equal("10.0.0.1", audit.ObjectId);
+        Assert.Equal("Success", audit.Result);
+    }
+
+    [Fact]
+    public async Task Free_ip_ping_requires_antiforgery_and_ping_permission()
+    {
+        using var allowedFactory = new ServerPageFactory(
+            NewUser(),
+            PermissionCode.AssetView,
+            PermissionCode.PingExecute);
+        allowedFactory.InitializeData();
+        await allowedFactory.AddSubnetAsync();
+        var allowedSubnet = await allowedFactory.GetOnlySubnetAsync();
+        using var allowedClient = allowedFactory.CreateAuthenticatedClient();
+
+        var missingToken = await PostFreeIpPingAsync(
+            allowedClient,
+            "/servers?handler=PingFreeIp",
+            allowedSubnet.Id,
+            "10.0.0.1");
+
+        Assert.Equal(HttpStatusCode.BadRequest, missingToken.StatusCode);
+
+        using var deniedFactory = new ServerPageFactory(
+            NewUser(),
+            PermissionCode.AssetView);
+        deniedFactory.InitializeData();
+        await deniedFactory.AddSubnetAsync();
+        var deniedSubnet = await deniedFactory.GetOnlySubnetAsync();
+        using var deniedClient = deniedFactory.CreateAuthenticatedClient();
+        var deniedToken = AntiforgeryToken(await deniedClient.GetStringAsync(
+            $"/servers?Query.PoolMode=true&Query.SubnetId={deniedSubnet.Id}"));
+
+        var forbidden = await PostFreeIpPingAsync(
+            deniedClient,
+            "/servers?handler=PingFreeIp",
+            deniedSubnet.Id,
+            "10.0.0.1",
+            deniedToken);
+
+        Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+    }
+
+    [Fact]
     public async Task Edit_page_groups_server_fields_and_keeps_update_concurrency_inputs()
     {
         using var factory = new ServerPageFactory(NewUser(), PermissionCode.AssetView, PermissionCode.AssetEdit);
@@ -1623,6 +1732,23 @@ public sealed class AssetAndPingTests
                 new("__RequestVerificationToken", antiforgeryToken),
             ]));
 
+    private static Task<HttpResponseMessage> PostFreeIpPingAsync(
+        HttpClient client,
+        string endpoint,
+        Guid subnetId,
+        string targetIp,
+        string? antiforgeryToken = null)
+    {
+        var values = new List<KeyValuePair<string, string>>
+        {
+            new("subnetId", subnetId.ToString()),
+            new("targetIp", targetIp),
+        };
+        if (antiforgeryToken is not null)
+            values.Add(new("__RequestVerificationToken", antiforgeryToken));
+        return client.PostAsync(endpoint, new FormUrlEncodedContent(values));
+    }
+
     private static string ServerRow(string html, Guid assetId)
     {
         var match = Regex.Match(
@@ -1630,6 +1756,21 @@ public sealed class AssetAndPingTests
             $"<tr[^>]*data-asset-id=\"{assetId}\"[^>]*>.*?</tr>",
             RegexOptions.Singleline);
         Assert.True(match.Success, $"Could not find the server row for {assetId}.");
+        return match.Value;
+    }
+
+    private static string FreeAddressRow(
+        string html,
+        Guid subnetId,
+        string businessIp)
+    {
+        var match = Regex.Match(
+            html,
+            $"<tr[^>]*data-subnet-id=\"{subnetId}\"[^>]*data-business-ip=\"{Regex.Escape(businessIp)}\"[^>]*>.*?</tr>",
+            RegexOptions.Singleline);
+        Assert.True(
+            match.Success,
+            $"Could not find the free-address row for {subnetId}/{businessIp}.");
         return match.Value;
     }
 
@@ -1885,6 +2026,15 @@ public sealed class AssetAndPingTests
         {
             using var scope = Services.CreateScope();
             return await scope.ServiceProvider.GetRequiredService<WebPassDbContext>().PingResults.CountAsync();
+        }
+        public async Task<List<AuditLog>> GetAuditLogsAsync()
+        {
+            using var scope = Services.CreateScope();
+            return await scope.ServiceProvider
+                .GetRequiredService<WebPassDbContext>()
+                .AuditLogs
+                .AsNoTracking()
+                .ToListAsync();
         }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder) => builder.ConfigureServices(services =>

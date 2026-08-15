@@ -123,7 +123,9 @@
             AliveStatus.Decommissioned => "warning",
             _ => "warning",
         };
-        <tr data-asset-id="@item.AssetId">
+        <tr data-asset-id="@item.AssetId"
+            data-subnet-id="@item.SubnetId"
+            data-business-ip="@item.BusinessIp">
             <td class="data-value">@item.BusinessIp</td>
             <td>@(item.Location ?? "—")</td>
             <td>
@@ -228,9 +230,41 @@
                     </section>
                 }
             }
-            else if (Model.CanCreate)
+            else
             {
-                <a href="/servers?Input.BusinessIp=@item.BusinessIp">登记此 IP</a>
+                @if (Model.CanPing || Model.CanCreate)
+                {
+                    <div class="table-actions">
+                        @if (Model.CanPing)
+                        {
+                            <form method="post" asp-page-handler="PingFreeIp">
+                                <input type="hidden" name="subnetId" value="@item.SubnetId" />
+                                <input type="hidden" name="targetIp" value="@item.BusinessIp" />
+                                <input type="hidden" name="Query.Take" value="@Model.Query.Take" />
+                                <button type="submit" data-submit-label="正在检测">Ping</button>
+                            </form>
+                        }
+                        @if (Model.CanCreate)
+                        {
+                            <a href="/servers?Input.BusinessIp=@item.BusinessIp">登记此 IP</a>
+                        }
+                    </div>
+                }
+                @if (Model.CanPing &&
+                     Model.FreeIpPingFeedback is { } freeIpPingFeedback &&
+                     freeIpPingFeedback.SubnetId == item.SubnetId &&
+                     string.Equals(
+                         freeIpPingFeedback.TargetIp,
+                         item.BusinessIp,
+                         StringComparison.Ordinal))
+                {
+                    <section class="confirm-panel"
+                             data-free-ip-ping-feedback
+                             data-tone="@(freeIpPingFeedback.IsSuccess ? "success" : "warning")"
+                             role="status">
+                        <p>@freeIpPingFeedback.Summary</p>
+                    </section>
+                }
             }
             </td>
         </tr>

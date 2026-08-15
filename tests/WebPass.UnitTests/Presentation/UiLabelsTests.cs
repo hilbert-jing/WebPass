@@ -59,6 +59,7 @@ public sealed class UiLabelsTests
     [Theory]
     [InlineData("AssetCreate", "登记服务器")]
     [InlineData("AssetEdit", "编辑服务器")]
+    [InlineData("PingUnregisteredAddress", "探测空闲 IP")]
     [InlineData("AssetArchive", "归档服务器")]
     [InlineData("AdministratorPasswordExport", "导出服务器密码")]
     [InlineData("AssetExport", "导出服务器资产")]
@@ -90,6 +91,7 @@ public sealed class UiLabelsTests
     [InlineData("DataEncryptionKey", "数据加密密钥")]
     [InlineData("User", "用户")]
     [InlineData("Subnet", "网段")]
+    [InlineData("SubnetAddress", "子网地址")]
     public void Emitted_audit_object_types_have_stable_chinese_labels(
         string objectType,
         string expected) =>
