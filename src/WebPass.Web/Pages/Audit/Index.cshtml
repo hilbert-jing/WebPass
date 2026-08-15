@@ -43,7 +43,11 @@
             var correlationStatus = $"audit-correlation-status-{entry.Id:N}";
             <tr>
                 <td class="data-value">@entry.OccurredAt.ToString("yyyy-MM-dd HH:mm:ss zzz")</td>
-                <td class="data-value">@(entry.ActorUserId?.ToString() ?? "系统")</td>
+                <td class="data-value">@(string.IsNullOrWhiteSpace(entry.ActorUsername)
+                    ? entry.ActorUserId is { } actorUserId
+                        ? $"未知用户（{actorUserId}）"
+                        : "系统"
+                    : entry.ActorUsername)</td>
                 <td>@UiLabels.ForAuditAction(entry.Action)</td>
                 <td>
                     @UiLabels.ForAuditObjectType(entry.ObjectType)

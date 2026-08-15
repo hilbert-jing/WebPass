@@ -647,11 +647,13 @@ public sealed class VisualSystemPageTests
     {
         using var factory = new PresentationFactory();
         factory.InitializeUser(true, PermissionCode.AuditView);
+        var orphanActorId = Guid.Parse("11111111-2222-3333-4444-555555555555");
         factory.Seed(db =>
         {
             db.AuditLogs.Add(new AuditLog
             {
                 ActorUserId = factory.UserId,
+                ActorUsername = "presentation-user",
                 Action = "UserPermissionsReplace",
                 ObjectType = "User",
                 ObjectId = "operator",
@@ -660,10 +662,16 @@ public sealed class VisualSystemPageTests
             });
             db.AuditLogs.Add(new AuditLog
             {
-                ActorUserId = factory.UserId,
+                ActorUserId = orphanActorId,
                 Action = "UnexpectedAction42",
                 ObjectType = "UnexpectedObject42",
                 Result = "UnexpectedResult42",
+            });
+            db.AuditLogs.Add(new AuditLog
+            {
+                Action = "Login",
+                ObjectType = "User",
+                Result = "Success",
             });
             var userId = Guid.NewGuid();
             db.Users.Add(new AppUser
@@ -708,6 +716,10 @@ public sealed class VisualSystemPageTests
         Assert.Contains("未知操作", auditHtml, StringComparison.Ordinal);
         Assert.Contains("未知对象", auditHtml, StringComparison.Ordinal);
         Assert.Contains("未知结果", auditHtml, StringComparison.Ordinal);
+        Assert.Contains("presentation-user", auditHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain(factory.UserId.ToString(), auditHtml, StringComparison.Ordinal);
+        Assert.Contains("\u7cfb\u7edf", auditHtml, StringComparison.Ordinal);
+        Assert.Contains($"\u672a\u77e5\u7528\u6237\uff08{orphanActorId}\uff09", auditHtml, StringComparison.Ordinal);
         Assert.DoesNotContain("UserPermissionsReplace", auditHtml, StringComparison.Ordinal);
         Assert.DoesNotContain("UnexpectedAction42", auditHtml, StringComparison.Ordinal);
         Assert.DoesNotContain("UnexpectedObject42", auditHtml, StringComparison.Ordinal);

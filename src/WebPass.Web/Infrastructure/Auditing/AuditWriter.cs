@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using WebPass.Web.Data;
 using WebPass.Web.Domain.Entities;
 
@@ -25,10 +26,17 @@ public sealed class AuditWriter(WebPassDbContext db, IHttpContextAccessor? httpC
         var sourceIp = entry.SourceIp?.ToString() ?? context?.Connection.RemoteIpAddress?.ToString();
         var correlationId = entry.CorrelationId ?? context?.TraceIdentifier;
         var details = entry.Payload is null ? null : SerializeAndValidate(entry.Payload);
+        var actorUsername = entry.ActorUserId is { } actorUserId
+            ? await db.Users.AsNoTracking()
+                .Where(user => user.Id == actorUserId)
+                .Select(user => user.Username)
+                .SingleOrDefaultAsync(ct)
+            : null;
 
         db.AuditLogs.Add(new AuditLog
         {
             ActorUserId = entry.ActorUserId,
+            ActorUsername = actorUsername,
             Action = entry.Action,
             ObjectType = entry.ObjectType,
             ObjectId = entry.ObjectId,

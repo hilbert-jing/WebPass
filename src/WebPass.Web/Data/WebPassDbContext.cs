@@ -64,6 +64,7 @@ public sealed class WebPassDbContext(DbContextOptions<WebPassDbContext> options)
 
         builder.Entity<AuditLog>(entity =>
         {
+            entity.Property(x => x.ActorUsername).HasMaxLength(128);
             entity.Property(x => x.Action).HasMaxLength(128);
             entity.Property(x => x.ObjectType).HasMaxLength(128);
             entity.Property(x => x.ObjectId).HasMaxLength(128);
