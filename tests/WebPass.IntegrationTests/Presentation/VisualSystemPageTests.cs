@@ -365,6 +365,108 @@ public sealed class VisualSystemPageTests
     }
 
     [Fact]
+    public async Task Server_primary_actions_promote_password_reveal()
+    {
+        using var factory = new PresentationFactory();
+        factory.InitializeUser(
+            false,
+            PermissionCode.AssetView,
+            PermissionCode.AssetEdit,
+            PermissionCode.PingExecute,
+            PermissionCode.SecretReveal,
+            PermissionCode.AssetArchive);
+        var subnetId = Guid.NewGuid();
+        var assetId = Guid.NewGuid();
+        factory.Seed(db =>
+        {
+            db.Subnets.Add(new Subnet
+            {
+                Id = subnetId,
+                Name = "安全网段",
+                Cidr = "10.30.0.0/24",
+                NetworkAddress = "10.30.0.0",
+                PrefixLength = 24,
+                Location = "总部",
+                IsEnabled = true,
+            });
+            db.ServerAssets.Add(new ServerAsset
+            {
+                Id = assetId,
+                SubnetId = subnetId,
+                BusinessIp = "10.30.0.9",
+                BusinessIpNumber = 169738249,
+                Location = "总部",
+                AliveStatus = AliveStatus.Alive,
+                ComputerName = "web-09",
+                SystemName = "WebPass",
+            });
+        });
+        using var client = factory.CreateAuthenticatedClient();
+
+        var html = await client.GetStringAsync("/servers");
+        var row = Regex.Match(
+            html,
+            $"<tr[^>]*data-asset-id=\"{assetId}\"[^>]*>.*?</tr>",
+            RegexOptions.Singleline).Value;
+        var edit = row.IndexOf("编辑", StringComparison.Ordinal);
+        var ping = row.IndexOf("Ping", StringComparison.Ordinal);
+        var reveal = row.IndexOf("查看密码", StringComparison.Ordinal);
+        var more = row.IndexOf("更多操作", StringComparison.Ordinal);
+        var moreActions = Regex.Match(
+            row,
+            "<details[^>]*data-more-actions[^>]*>.*?</details>",
+            RegexOptions.Singleline).Value;
+
+        Assert.NotEmpty(row);
+        Assert.True(
+            edit >= 0 && edit < ping && ping < reveal && reveal < more,
+            "Expected Edit, Ping, Reveal, and More in primary-action order.");
+        Assert.NotEmpty(moreActions);
+        Assert.Contains("归档服务器", moreActions, StringComparison.Ordinal);
+        Assert.DoesNotContain("查看密码", moreActions, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Reveal_only_server_action_does_not_render_empty_more_menu()
+    {
+        using var factory = new PresentationFactory();
+        factory.InitializeUser(
+            false,
+            PermissionCode.AssetView,
+            PermissionCode.SecretReveal);
+        var subnetId = Guid.NewGuid();
+        factory.Seed(db =>
+        {
+            db.Subnets.Add(new Subnet
+            {
+                Id = subnetId,
+                Name = "安全网段",
+                Cidr = "10.31.0.0/24",
+                NetworkAddress = "10.31.0.0",
+                PrefixLength = 24,
+                Location = "总部",
+                IsEnabled = true,
+            });
+            db.ServerAssets.Add(new ServerAsset
+            {
+                SubnetId = subnetId,
+                BusinessIp = "10.31.0.9",
+                BusinessIpNumber = 169803785,
+                Location = "总部",
+                AliveStatus = AliveStatus.Alive,
+                ComputerName = "web-09",
+                SystemName = "WebPass",
+            });
+        });
+        using var client = factory.CreateAuthenticatedClient();
+
+        var html = await client.GetStringAsync("/servers");
+
+        Assert.Contains("data-secret-reveal-control", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("更多操作", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Server_drawer_response_preserves_preopened_accessibility_state()
     {
         using var factory = new PresentationFactory();

@@ -478,6 +478,16 @@ label {
 .command-bar > * {
     flex: 0 1 240px;
 }
+.table-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.table-actions form {
+    margin: 0;
+}
 
 .data-table,
 table {

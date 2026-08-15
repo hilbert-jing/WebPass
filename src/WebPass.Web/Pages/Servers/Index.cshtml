@@ -146,57 +146,32 @@
             <td>
             @if (item.IsRegistered && item.AssetId is { } id)
             {
-                @if (Model.CanEdit)
-                {
-                    <a asp-page="/Servers/Edit" asp-route-id="@id">编辑</a>
-                }
-                @if (Model.CanPing)
-                {
-                    <form method="post" asp-page-handler="Ping">
-                        <input type="hidden" name="id" value="@id" />
-                        <button type="submit" data-submit-label="正在检测">Ping</button>
-                    </form>
-                }
-                @if (Model.PingFeedback is { } pingFeedback &&
-                     pingFeedback.AssetId == id)
-                {
-                    <section class="confirm-panel"
-                             data-ping-feedback
-                             data-tone="@(pingFeedback.IsSuccess ? "success" : "warning")"
-                             role="status">
-                        <p>@pingFeedback.Summary</p>
-                        @if (pingFeedback.IsSuccess && Model.CanMarkAlive)
-                        {
-                            <form method="post" asp-page-handler="MarkAlive">
-                                <input type="hidden" name="id" value="@id" />
-                                <input type="hidden" name="rowVersion" value="@Convert.ToBase64String(item.RowVersion ?? [])" />
-                                <button type="submit" data-submit-label="正在标记">标记为存活</button>
-                            </form>
-                        }
-                    </section>
-                }
-                @if (Model.CanReveal || Model.CanArchive)
-                {
-                    <details>
-                        <summary>更多操作</summary>
-                        @if (Model.CanReveal)
-                        {
-                            <button type="button"
-                                    data-secret-reveal-control
-                                    data-secret-reveal
-                                    data-asset-id="@id"
-                                    data-output="secret-@id">
-                                查看密码
-                            </button>
-                            <section id="secret-@id" data-secret-panel hidden>
-                                <span data-secret-status role="status" aria-live="polite">服务器密码将在 30 秒后自动隐藏</span>
-                                <code data-secret-value></code>
-                                <span data-secret-countdown aria-hidden="true">30</span>
-                                <button type="button" data-secret-copy>复制密码</button>
-                            </section>
-                        }
-                        @if (Model.CanArchive)
-                        {
+                <div class="table-actions">
+                    @if (Model.CanEdit)
+                    {
+                        <a asp-page="/Servers/Edit" asp-route-id="@id">编辑</a>
+                    }
+                    @if (Model.CanPing)
+                    {
+                        <form method="post" asp-page-handler="Ping">
+                            <input type="hidden" name="id" value="@id" />
+                            <button type="submit" data-submit-label="正在检测">Ping</button>
+                        </form>
+                    }
+                    @if (Model.CanReveal)
+                    {
+                        <button type="button"
+                                data-secret-reveal-control
+                                data-secret-reveal
+                                data-asset-id="@id"
+                                data-output="secret-@id">
+                            查看密码
+                        </button>
+                    }
+                    @if (Model.CanArchive)
+                    {
+                        <details data-more-actions>
+                            <summary>更多操作</summary>
                             <details data-archive-confirmation>
                                 <summary>归档服务器</summary>
                                 <section class="confirm-panel"
@@ -222,8 +197,35 @@
                                     </form>
                                 </section>
                             </details>
+                        </details>
+                    }
+                </div>
+                @if (Model.PingFeedback is { } pingFeedback &&
+                     pingFeedback.AssetId == id)
+                {
+                    <section class="confirm-panel"
+                             data-ping-feedback
+                             data-tone="@(pingFeedback.IsSuccess ? "success" : "warning")"
+                             role="status">
+                        <p>@pingFeedback.Summary</p>
+                        @if (pingFeedback.IsSuccess && Model.CanMarkAlive)
+                        {
+                            <form method="post" asp-page-handler="MarkAlive">
+                                <input type="hidden" name="id" value="@id" />
+                                <input type="hidden" name="rowVersion" value="@Convert.ToBase64String(item.RowVersion ?? [])" />
+                                <button type="submit" data-submit-label="正在标记">标记为存活</button>
+                            </form>
                         }
-                    </details>
+                    </section>
+                }
+                @if (Model.CanReveal)
+                {
+                    <section id="secret-@id" data-secret-panel hidden>
+                        <span data-secret-status role="status" aria-live="polite">服务器密码将在 30 秒后自动隐藏</span>
+                        <code data-secret-value></code>
+                        <span data-secret-countdown aria-hidden="true">30</span>
+                        <button type="button" data-secret-copy>复制密码</button>
+                    </section>
                 }
             }
             else if (Model.CanCreate)
