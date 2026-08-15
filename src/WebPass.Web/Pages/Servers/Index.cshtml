@@ -73,8 +73,11 @@
         <input asp-for="Query.PoolMode" />
         <label asp-for="Query.PoolMode">显示完整地址池</label>
     </div>
-    <input type="hidden" asp-for="Query.Skip" />
-    <input type="hidden" asp-for="Query.Take" />
+    <div>
+        <label asp-for="Query.Take">每页显示数量</label>
+        <input asp-for="Query.Take" type="number" min="1" max="500" />
+    </div>
+    <input type="hidden" name="Query.Skip" value="0" />
     <button type="submit">应用筛选</button>
 </form>
 

@@ -784,6 +784,50 @@ public sealed class AssetAndPingTests
     }
 
     [Theory]
+    [InlineData(0, 1)]
+    [InlineData(501, 500)]
+    public async Task Server_page_normalizes_page_size_before_querying(
+        int requested,
+        int expected)
+    {
+        using var factory = new ServerPageFactory(NewUser(), PermissionCode.AssetView);
+        factory.InitializeData();
+        using var client = factory.CreateAuthenticatedClient();
+
+        var response = await client.GetAsync($"/servers?Query.Take={requested}");
+        var html = await response.Content.ReadAsStringAsync();
+        var takeInput = Regex.Match(
+            html,
+            "<input[^>]*name=\"Query.Take\"[^>]*>",
+            RegexOptions.Singleline).Value;
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.NotEmpty(takeInput);
+        Assert.Contains("type=\"number\"", takeInput, StringComparison.Ordinal);
+        Assert.Contains($"value=\"{expected}\"", takeInput, StringComparison.Ordinal);
+        Assert.Contains("min=\"1\"", takeInput, StringComparison.Ordinal);
+        Assert.Contains("max=\"500\"", takeInput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Server_filter_resets_skip_and_normalizes_negative_offset()
+    {
+        using var factory = new ServerPageFactory(NewUser(), PermissionCode.AssetView);
+        factory.InitializeData();
+        using var client = factory.CreateAuthenticatedClient();
+
+        var response = await client.GetAsync("/servers?Query.Skip=-1&Query.Take=25");
+        var html = await response.Content.ReadAsStringAsync();
+        var filter = HtmlRegion(html, "form", "class=\"command-bar\"");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains(
+            "name=\"Query.Skip\" value=\"0\"",
+            filter,
+            StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData("MarkAlive", PermissionCode.StatusMarkAlive)]
     [InlineData("Archive", PermissionCode.AssetArchive)]
     public async Task Failed_non_create_command_does_not_validate_or_open_registration_drawer(

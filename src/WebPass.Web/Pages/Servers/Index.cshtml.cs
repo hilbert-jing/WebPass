@@ -146,6 +146,7 @@ public sealed class IndexModel(
 
     private async Task LoadAsync(CancellationToken ct)
     {
+        NormalizeQuery();
         Results = await assetService.ListAsync(Query, ct);
         var subnets = await db.Subnets.AsNoTracking()
             .OrderBy(x => x.NetworkAddress)
@@ -174,6 +175,20 @@ public sealed class IndexModel(
         CanPing = await AllowedAsync(PermissionCode.PingExecute, ct);
         CanMarkAlive = await AllowedAsync(PermissionCode.StatusMarkAlive, ct);
         CanReveal = await AllowedAsync(PermissionCode.SecretReveal, ct);
+    }
+
+    private void NormalizeQuery()
+    {
+        Query = Query with
+        {
+            Skip = Math.Max(0, Query.Skip),
+            Take = Math.Clamp(Query.Take, 1, 500),
+        };
+        if (!ModelState.TryGetValue("Query.Take", out var takeState) ||
+            takeState.ValidationState != Microsoft.AspNetCore.Mvc.ModelBinding.ModelValidationState.Invalid)
+        {
+            ModelState.Remove("Query.Take");
+        }
     }
 
     private Task<bool> AllowedAsync(string permission, CancellationToken ct) => permissions.IsAllowedAsync(UserId(), permission, ct);
