@@ -785,6 +785,25 @@ html[data-js-enabled] .drawer[data-open] {
         padding-inline: 6px;
     }
 
+    .change-password-link {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+    }
+
+    .app-sidebar:hover .change-password-link,
+    .app-sidebar:focus-within .change-password-link {
+        position: static;
+        width: auto;
+        height: auto;
+        overflow: visible;
+        clip-path: none;
+        white-space: normal;
+    }
+
     .app-content {
         padding-inline: 24px;
     }
@@ -918,22 +937,3 @@ html[data-js-enabled] .drawer[data-open] {
     padding: 6px 8px;
     text-decoration: none;
 }
-
-    .change-password-link {
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        overflow: hidden;
-        clip-path: inset(50%);
-        white-space: nowrap;
-    }
-
-    .app-sidebar:hover .change-password-link,
-    .app-sidebar:focus-within .change-password-link {
-        position: static;
-        width: auto;
-        height: auto;
-        overflow: visible;
-        clip-path: none;
-        white-space: normal;
-    }

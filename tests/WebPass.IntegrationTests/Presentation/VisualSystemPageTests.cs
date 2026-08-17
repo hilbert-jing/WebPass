@@ -1200,6 +1200,16 @@ public sealed class VisualSystemPageTests
 
         var html = await client.GetStringAsync("/servers");
         var css = await client.GetStringAsync("/css/site.css");
+        var tabletStart = css.IndexOf(
+            "@media (min-width: 768px) and (max-width: 1279px)",
+            StringComparison.Ordinal);
+        var mobileStart = css.IndexOf(
+            "@media (max-width: 767px)",
+            tabletStart,
+            StringComparison.Ordinal);
+        Assert.InRange(tabletStart, 0, css.Length - 1);
+        Assert.InRange(mobileStart, tabletStart + 1, css.Length - 1);
+        var tabletCss = css[tabletStart..mobileStart];
 
         Assert.Contains(
             "href=\"/account/change-password\"",
@@ -1211,6 +1221,8 @@ public sealed class VisualSystemPageTests
         Assert.Contains("action=\"/Logout\"", html, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(".sidebar-logout {", css, StringComparison.Ordinal);
         Assert.Contains("clip-path: none", css, StringComparison.Ordinal);
+        Assert.Contains(".change-password-link {", tabletCss, StringComparison.Ordinal);
+        Assert.Contains("clip-path: inset(50%)", tabletCss, StringComparison.Ordinal);
     }
 
     [Fact]
