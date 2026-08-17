@@ -130,6 +130,7 @@ builder.Services.Configure<SecretEncryptionOptions>(
 builder.Services.AddScoped<IPasswordHasher, Argon2PasswordHasher>();
 builder.Services.AddScoped<AuditWriter>();
 builder.Services.AddScoped<LoginService>();
+builder.Services.AddScoped<PasswordChangeService>();
 builder.Services.AddMemoryCache();
 builder.Services.AddRateLimiter(SecretRateLimitPolicies.AddTo);
 builder.Services.AddScoped<PermissionAuthorizationHandler>();
