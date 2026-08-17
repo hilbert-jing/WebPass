@@ -180,8 +180,10 @@ if (-not $existingRule) {
 elseif ($PSCmdlet.ShouldProcess($firewallRuleName, 'Refresh LAN-only firewall scope')) {
     Set-NetFirewallRule -DisplayName $firewallRuleName -Direction Inbound -Action Allow `
         -Profile Domain,Private | Out-Null
-    Set-NetFirewallAddressFilter -AssociatedNetFirewallRule $existingRule `
-        -RemoteAddress $LanRemoteAddress | Out-Null
+    $existingRule |
+    Get-NetFirewallAddressFilter |
+    Set-NetFirewallAddressFilter -RemoteAddress $LanRemoteAddress |
+    Out-Null
 }
 
 Write-Host 'IIS initialization completed.'
