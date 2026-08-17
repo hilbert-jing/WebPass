@@ -78,6 +78,7 @@ public sealed class UiLabelsTests
     [InlineData("Logout", "退出登录")]
     [InlineData("UserCreate", "创建用户")]
     [InlineData("UserPasswordReset", "重置用户密码")]
+    [InlineData("UserPasswordChange", "修改自己的登录密码")]
     [InlineData("UserEnablement", "更改用户状态")]
     [InlineData("UserPermissionsReplace", "更新用户权限")]
     public void Emitted_audit_actions_have_stable_chinese_labels(

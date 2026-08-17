@@ -1201,6 +1201,11 @@ public sealed class VisualSystemPageTests
         var html = await client.GetStringAsync("/servers");
         var css = await client.GetStringAsync("/css/site.css");
 
+        Assert.Contains(
+            "href=\"/account/change-password\"",
+            html,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("修改密码", html, StringComparison.Ordinal);
         Assert.Contains("class=\"sidebar-logout\"", html, StringComparison.Ordinal);
         Assert.Contains("method=\"post\"", html, StringComparison.Ordinal);
         Assert.Contains("action=\"/Logout\"", html, StringComparison.OrdinalIgnoreCase);

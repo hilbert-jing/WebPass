@@ -168,9 +168,12 @@
                         <strong>已认证会话</strong>
                         <small>内网连接</small>
                     </span>
-                    <form class="sidebar-logout" method="post" asp-page="/Logout">
-                        <button class="logout-button" type="submit">退出</button>
-                    </form>
+                    <div class="sidebar-account-actions">
+                        <a class="change-password-link" href="/account/change-password" aria-current="@(IsCurrent("/account/change-password") ? "page" : null)">修改密码</a>
+                        <form class="sidebar-logout" method="post" asp-page="/Logout">
+                            <button class="logout-button" type="submit">退出</button>
+                        </form>
+                    </div>
                 </div>
             </aside>
 

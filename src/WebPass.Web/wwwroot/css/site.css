@@ -372,6 +372,7 @@ label {
     padding: 6px 8px;
 }
 
+.change-password-link:hover,
 .logout-button:hover,
 .sidebar-close:hover {
     background: color-mix(in srgb, var(--color-canvas) 10%, transparent);
@@ -900,3 +901,39 @@ html[data-js-enabled] .drawer[data-open] {
         animation-iteration-count: 1 !important;
     }
 }
+
+.sidebar-account-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.change-password-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+    border-radius: var(--radius-control);
+    color: var(--color-canvas);
+    font-size: .75rem;
+    padding: 6px 8px;
+    text-decoration: none;
+}
+
+    .change-password-link {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+    }
+
+    .app-sidebar:hover .change-password-link,
+    .app-sidebar:focus-within .change-password-link {
+        position: static;
+        width: auto;
+        height: auto;
+        overflow: visible;
+        clip-path: none;
+        white-space: normal;
+    }

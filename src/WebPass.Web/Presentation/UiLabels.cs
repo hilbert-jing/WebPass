@@ -61,6 +61,7 @@ public static class UiLabels
         "Logout" => "退出登录",
         "UserCreate" => "创建用户",
         "UserPasswordReset" => "重置用户密码",
+        "UserPasswordChange" => "修改自己的登录密码",
         "UserEnablement" => "更改用户状态",
         "UserPermissionsReplace" => "更新用户权限",
         _ => "未知操作",
