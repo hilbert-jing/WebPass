@@ -389,6 +389,10 @@ label {
     min-width: 0;
 }
 
+.data-table tr[id] {
+    scroll-margin-top: 64px;
+}
+
 .topbar {
     position: sticky;
     z-index: 20;

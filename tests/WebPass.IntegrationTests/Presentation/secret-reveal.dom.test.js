@@ -465,13 +465,15 @@ async function testCopyUsesSamePanelWithoutExtendingExpiry() {
 
 async function testForbiddenRedirectKeepsPostContract() {
     const env = createEnvironment();
+    const returnUrl = "/servers?Query.Search=%E6%9C%BA%E6%88%BF%20A%26B&Query.SubnetId=subnet-1&Query.Status=Unknown&Query.IncludeArchived=True&Query.PoolMode=True&Query.Skip=50&Query.Take=25#server-asset-primary";
+    env.primary.reveal.dataset.returnUrl = returnUrl;
     env.queueResponse(403);
     env.click(env.primary.reveal);
     await flushAsyncWork();
 
     assert.deepEqual(
         env.redirects,
-        ["/secrets/reauthenticate?returnUrl=%2Fservers"]);
+        [`/secrets/reauthenticate?returnUrl=${encodeURIComponent(returnUrl)}`]);
     assert.equal(env.fetchCalls[0].options.method, "POST");
     assert.equal(env.fetchCalls[0].options.credentials, "same-origin");
     assert.equal(

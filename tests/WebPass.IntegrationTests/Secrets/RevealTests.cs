@@ -95,7 +95,8 @@ public sealed class RevealTests
         factory.InitializeData();
         using var client = factory.CreateAuthenticatedClient();
 
-        var html = await client.GetStringAsync("/servers");
+        var html = await client.GetStringAsync(
+            "/servers?Query.Search=ERP&Query.Status=Unknown&Query.IncludeArchived=true&Query.Skip=0&Query.Take=25");
 
         Assert.Contains($"data-asset-id=\"{factory.AssetId}\"", html, StringComparison.Ordinal);
         Assert.Contains("data-secret-reveal", html, StringComparison.Ordinal);
@@ -108,7 +109,59 @@ public sealed class RevealTests
         Assert.Contains("服务器密码将在 30 秒后自动隐藏", html, StringComparison.Ordinal);
         Assert.Contains("/js/secret-reveal.js", html, StringComparison.Ordinal);
         Assert.DoesNotContain("server-password", html, StringComparison.Ordinal);
+        var returnUrlMatch = Regex.Match(html, "data-return-url=\"([^\"]+)\"");
+        Assert.True(returnUrlMatch.Success);
+        var returnUrl = new Uri(client.BaseAddress!, WebUtility.HtmlDecode(returnUrlMatch.Groups[1].Value));
+        var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(returnUrl.Query);
+        Assert.Equal("ERP", query["Query.Search"]);
+        Assert.Equal("Unknown", query["Query.Status"]);
+        Assert.Equal("True", query["Query.IncludeArchived"]);
+        Assert.Equal("False", query["Query.PoolMode"]);
+        Assert.Equal("0", query["Query.Skip"]);
+        Assert.Equal("25", query["Query.Take"]);
+        Assert.Equal($"#server-{factory.AssetId}", returnUrl.Fragment);
+        Assert.Contains($"id=\"server-{factory.AssetId}\"", html, StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Reauthentication_preserves_list_query_and_row_anchor_including_after_failure(
+        bool failFirst)
+    {
+        using var factory = new RevealFactory();
+        factory.InitializeData();
+        using var client = factory.CreateAuthenticatedClient();
+        var returnUrl = $"/servers?Query.Search=%E6%9C%BA%E6%88%BF%20A%26B&Query.SubnetId={Guid.NewGuid()}&Query.Status=Unknown&Query.IncludeArchived=True&Query.PoolMode=True&Query.Skip=50&Query.Take=25#server-{factory.AssetId}";
+        var html = await client.GetStringAsync(
+            $"/secrets/reauthenticate?returnUrl={Uri.EscapeDataString(returnUrl)}");
+        Assert.Equal(returnUrl, ReturnUrlInput(html));
+        var token = Regex.Match(html, "name=\"__RequestVerificationToken\"[^>]*value=\"([^\"]+)\"").Groups[1].Value;
+        if (failFirst)
+        {
+            using var failed = await client.PostAsync("/secrets/reauthenticate", new FormUrlEncodedContent(
+            [
+                new("Input.Password", "wrong-password"),
+                new("ReturnUrl", ReturnUrlInput(html)),
+                new("__RequestVerificationToken", token),
+            ]));
+            Assert.Equal(HttpStatusCode.OK, failed.StatusCode);
+            html = await failed.Content.ReadAsStringAsync();
+            Assert.Equal(returnUrl, ReturnUrlInput(html));
+        }
+
+        using var response = await client.PostAsync("/secrets/reauthenticate", new FormUrlEncodedContent(
+        [
+            new("Input.Password", "current-password"),
+            new("ReturnUrl", ReturnUrlInput(html)),
+            new("__RequestVerificationToken", token),
+        ]));
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Equal(returnUrl, response.Headers.Location!.OriginalString);
+    }
+
+    private static string ReturnUrlInput(string html) => WebUtility.HtmlDecode(
+        Regex.Match(html, "name=\"ReturnUrl\"[^>]*value=\"([^\"]*)\"").Groups[1].Value);
 
     [Fact]
     public async Task Viewing_reauthentication_page_does_not_consume_sensitive_post_budget()

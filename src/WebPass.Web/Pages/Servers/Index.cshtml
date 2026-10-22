@@ -4,6 +4,8 @@
 @model WebPass.Web.Pages.Servers.IndexModel
 @{
     ViewData["Title"] = "服务器资产";
+    var listRouteValues = PingCommandWorkflow.ListRouteValues(Model.Query);
+    var listUrl = Url.Page("/Servers/Index", listRouteValues) ?? "/servers";
     var openRegistration = Model.CanCreate &&
         ((Request.Method == "POST" &&
           string.Equals(Request.Query["handler"], "Create", StringComparison.OrdinalIgnoreCase)) ||
@@ -32,7 +34,7 @@
 @if (Model.CanReveal)
 {
     <p class="form-section">
-        查看密码前需先<a href="/secrets/reauthenticate?returnUrl=%2Fservers">验证当前密码</a>。
+        查看密码前需先<a asp-page="/Secrets/Reauthenticate" asp-route-returnUrl="@listUrl">验证当前密码</a>。
     </p>
     <form id="secret-reveal-antiforgery" hidden>@Html.AntiForgeryToken()</form>
     <p class="form-section" data-secret-reveal-fallback>
@@ -116,6 +118,9 @@
     <tbody>
     @foreach (var item in Model.Results.Items)
     {
+        var rowId = item.AssetId is { } assetId
+            ? $"server-{assetId}"
+            : $"address-{item.SubnetId}-{item.BusinessIp}";
         var statusTone = item.AliveStatus switch
         {
             AliveStatus.Alive => "success",
@@ -123,7 +128,8 @@
             AliveStatus.Decommissioned => "warning",
             _ => "warning",
         };
-        <tr data-asset-id="@item.AssetId"
+        <tr id="@rowId"
+            data-asset-id="@item.AssetId"
             data-subnet-id="@item.SubnetId"
             data-business-ip="@item.BusinessIp">
             <td class="data-value">@item.BusinessIp</td>
@@ -157,6 +163,10 @@
                     {
                         <form method="post" asp-page-handler="Ping">
                             <input type="hidden" name="id" value="@id" />
+                            @foreach (var routeValue in listRouteValues)
+                            {
+                                <input type="hidden" name="@routeValue.Key" value="@(routeValue.Value?.ToString())" />
+                            }
                             <button type="submit" data-submit-label="正在检测">Ping</button>
                         </form>
                     }
@@ -166,6 +176,7 @@
                                 data-secret-reveal-control
                                 data-secret-reveal
                                 data-asset-id="@id"
+                                data-return-url="@($"{listUrl}#{rowId}")"
                                 data-output="secret-@id">
                             查看密码
                         </button>
@@ -240,7 +251,10 @@
                             <form method="post" asp-page-handler="PingFreeIp">
                                 <input type="hidden" name="subnetId" value="@item.SubnetId" />
                                 <input type="hidden" name="targetIp" value="@item.BusinessIp" />
-                                <input type="hidden" name="Query.Take" value="@Model.Query.Take" />
+                                @foreach (var routeValue in listRouteValues)
+                                {
+                                    <input type="hidden" name="@routeValue.Key" value="@(routeValue.Value?.ToString())" />
+                                }
                                 <button type="submit" data-submit-label="正在检测">Ping</button>
                             </form>
                         }

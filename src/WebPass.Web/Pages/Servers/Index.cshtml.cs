@@ -92,7 +92,9 @@ public sealed class IndexModel(
             TempData,
             feedback => RedirectToPage(
                 "/Servers/Index",
-                PingCommandWorkflow.TargetRouteValues(feedback)),
+                pageHandler: null,
+                routeValues: PingCommandWorkflow.ListRouteValues(Query),
+                fragment: $"server-{feedback.AssetId}"),
             ct);
     }
 
@@ -113,9 +115,9 @@ public sealed class IndexModel(
             TempData,
             feedback => RedirectToPage(
                 "/Servers/Index",
-                PingCommandWorkflow.UnregisteredTargetRouteValues(
-                    feedback,
-                    Query.Take)),
+                pageHandler: null,
+                routeValues: PingCommandWorkflow.ListRouteValues(Query),
+                fragment: $"address-{feedback.SubnetId}-{feedback.TargetIp}"),
             ct);
     }
 

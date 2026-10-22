@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
+using WebPass.Web.Application.Assets;
 using WebPass.Web.Application.Ping;
 
 namespace WebPass.Web.Presentation;
@@ -149,11 +150,17 @@ public static class PingCommandWorkflow
         }
     }
 
-    public static RouteValueDictionary TargetRouteValues(
-        ServerPingFeedback feedback) =>
+    public static RouteValueDictionary ListRouteValues(
+        ServerListQuery query) =>
         new()
         {
-            ["Query.Search"] = feedback.TargetBusinessIp,
+            ["Query.Search"] = query.Search,
+            ["Query.SubnetId"] = query.SubnetId,
+            ["Query.Status"] = query.Status,
+            ["Query.IncludeArchived"] = query.IncludeArchived,
+            ["Query.PoolMode"] = query.PoolMode,
+            ["Query.Skip"] = Math.Max(0, query.Skip),
+            ["Query.Take"] = Math.Clamp(query.Take, 1, 500),
         };
 
 
@@ -252,17 +259,6 @@ public static class PingCommandWorkflow
         }
     }
 
-    public static RouteValueDictionary UnregisteredTargetRouteValues(
-        UnregisteredPingFeedback feedback,
-        int take) =>
-        new()
-        {
-            ["Query.SubnetId"] = feedback.SubnetId,
-            ["Query.Search"] = feedback.TargetIp,
-            ["Query.PoolMode"] = true,
-            ["Query.Skip"] = 0,
-            ["Query.Take"] = Math.Clamp(take, 1, 500),
-        };
     private static bool IsCanonicalIpv4(string? value) =>
         value is not null &&
         IPAddress.TryParse(value, out var address) &&

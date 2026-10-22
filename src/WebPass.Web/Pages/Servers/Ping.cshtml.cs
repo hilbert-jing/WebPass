@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.AspNetCore.RateLimiting;
+using WebPass.Web.Application.Assets;
 using WebPass.Web.Application.Authorization;
 using WebPass.Web.Application.Ping;
 using WebPass.Web.Infrastructure.Security;
@@ -14,6 +15,9 @@ namespace WebPass.Web.Pages.Servers;
 [EnableRateLimiting(SecretRateLimitPolicies.Ping)]
 public sealed class PingModel(PingService pingService) : PageModel
 {
+    [BindProperty]
+    public ServerListQuery Query { get; set; } = new();
+
     public IActionResult OnGet() => StatusCode(
         StatusCodes.Status405MethodNotAllowed);
 
@@ -26,6 +30,8 @@ public sealed class PingModel(PingService pingService) : PageModel
             TempData,
             feedback => RedirectToPage(
                 "/Servers/Index",
-                PingCommandWorkflow.TargetRouteValues(feedback)),
+                pageHandler: null,
+                routeValues: PingCommandWorkflow.ListRouteValues(Query),
+                fragment: $"server-{feedback.AssetId}"),
             ct);
 }

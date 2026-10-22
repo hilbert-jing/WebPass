@@ -89,7 +89,8 @@
                 return;
             }
             if (response.status === 403) {
-                window.location.assign("/secrets/reauthenticate?returnUrl=%2Fservers");
+                const returnUrl = button.dataset.returnUrl || "/servers";
+                window.location.assign(`/secrets/reauthenticate?returnUrl=${encodeURIComponent(returnUrl)}`);
                 return;
             }
             if (!response.ok) {

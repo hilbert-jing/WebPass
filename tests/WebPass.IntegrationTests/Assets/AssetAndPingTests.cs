@@ -548,7 +548,7 @@ public sealed class AssetAndPingTests
         Assert.Contains("data-ping-feedback", targetRow, StringComparison.Ordinal);
         Assert.Contains("Ping 可达 · 12 ms", targetRow, StringComparison.Ordinal);
         Assert.Contains(">标记为存活<", targetRow, StringComparison.Ordinal);
-        Assert.DoesNotContain(
+        Assert.Contains(
             $"data-asset-id=\"{other.Id}\"",
             responseHtml,
             StringComparison.Ordinal);
@@ -557,8 +557,13 @@ public sealed class AssetAndPingTests
             (await factory.GetAssetsAsync()).Single(x => x.Id == target.Id).AliveStatus);
     }
 
-    [Fact]
-    public async Task Inventory_ping_from_second_page_redirects_to_the_target_row_with_feedback()
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public async Task Inventory_ping_preserves_second_page_filters_and_locates_the_target_row(
+        bool useDirectRoute,
+        bool poolMode)
     {
         using var factory = new ServerPageFactory(
             NewUser(),
@@ -567,36 +572,45 @@ public sealed class AssetAndPingTests
         factory.InitializeData();
         await factory.AddSubnetAsync();
         var target = await AddPagedAssetsAsync(factory);
+        var other = await factory.AddAssetAsync("10.0.0.52", "Rack 52", [52]);
+        var subnet = await factory.GetOnlySubnetAsync();
         using var client = factory.CreateAuthenticatedClient();
         var secondPage = await client.GetStringAsync(
-            "/servers?Query.Skip=50&Query.Take=50");
-        var token = AntiforgeryToken(secondPage);
+            $"/servers?Query.Search=Rack&Query.SubnetId={subnet.Id}&Query.Status=Unknown&Query.IncludeArchived=true&Query.PoolMode={poolMode}&Query.Skip=50&Query.Take=25");
         Assert.Contains(
             $"data-asset-id=\"{target.Id}\"",
             secondPage,
             StringComparison.Ordinal);
 
-        var response = await PostPingAsync(
+        var response = await PostRenderedRowFormAsync(
             client,
-            "/servers?handler=Ping",
-            target.Id,
-            token);
+            ServerRow(secondPage, target.Id),
+            useDirectRoute ? $"/servers/{target.Id}/ping" : null);
         var responseHtml = WebUtility.HtmlDecode(
             await client.GetStringAsync(response.Headers.Location!));
         var targetRow = ServerRow(responseHtml, target.Id);
 
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
-        Assert.Contains(
-            "Query.Search=10.0.0.51",
-            Uri.UnescapeDataString(response.Headers.Location!.OriginalString),
-            StringComparison.Ordinal);
+        var location = new Uri(client.BaseAddress!, response.Headers.Location!);
+        var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(location.Query);
+        Assert.Equal("Rack", query["Query.Search"]);
+        Assert.Equal(subnet.Id.ToString(), query["Query.SubnetId"]);
+        Assert.Equal("Unknown", query["Query.Status"]);
+        Assert.Equal("True", query["Query.IncludeArchived"]);
+        Assert.Equal(poolMode.ToString(), query["Query.PoolMode"]);
+        Assert.Equal("50", query["Query.Skip"]);
+        Assert.Equal("25", query["Query.Take"]);
+        Assert.Equal($"#server-{target.Id}", location.Fragment);
+        Assert.Contains($"id=\"server-{target.Id}\"", targetRow, StringComparison.Ordinal);
         Assert.Contains("Ping 可达 · 12 ms", targetRow, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-ping-feedback", ServerRow(responseHtml, other.Id), StringComparison.Ordinal);
+        Assert.Contains("共 52 条", responseHtml, StringComparison.Ordinal);
     }
 
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Ping_follow_redirect_finds_target_excluded_by_inventory_filter_or_direct_default_page(
+    public async Task Ping_without_a_visible_target_preserves_filters_or_uses_the_default_list(
         bool useDirectRoute)
     {
         using var factory = new ServerPageFactory(
@@ -621,14 +635,15 @@ public sealed class AssetAndPingTests
             token);
         var responseHtml = WebUtility.HtmlDecode(
             await client.GetStringAsync(response.Headers.Location!));
-        var targetRow = ServerRow(responseHtml, target.Id);
 
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
-        Assert.Contains(
-            "Query.Search=10.0.0.51",
-            Uri.UnescapeDataString(response.Headers.Location!.OriginalString),
-            StringComparison.Ordinal);
-        Assert.Contains("Ping 可达 · 12 ms", targetRow, StringComparison.Ordinal);
+        var location = new Uri(client.BaseAddress!, response.Headers.Location!);
+        var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(location.Query);
+        Assert.False(query.ContainsKey("Query.Search"));
+        Assert.Equal(useDirectRoute ? "" : "Alive", query.GetValueOrDefault("Query.Status").ToString());
+        Assert.Equal("0", query["Query.Skip"]);
+        Assert.Equal("50", query["Query.Take"]);
+        Assert.DoesNotContain($"data-asset-id=\"{target.Id}\"", responseHtml, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -1145,26 +1160,28 @@ public sealed class AssetAndPingTests
         await factory.AddSubnetAsync();
         var subnet = await factory.GetOnlySubnetAsync();
         using var client = factory.CreateAuthenticatedClient();
-        var poolUrl = $"/servers?Query.PoolMode=true&Query.SubnetId={subnet.Id}&Query.Take=25";
-        var token = AntiforgeryToken(await client.GetStringAsync(poolUrl));
+        var poolUrl = $"/servers?Query.Search=10.0.0.&Query.Status=Unknown&Query.IncludeArchived=true&Query.PoolMode=true&Query.SubnetId={subnet.Id}&Query.Skip=25&Query.Take=25";
+        var poolHtml = await client.GetStringAsync(poolUrl);
 
-        var response = await PostFreeIpPingAsync(
+        var response = await PostRenderedRowFormAsync(
             client,
-            "/servers?handler=PingFreeIp&Query.Take=25",
-            subnet.Id,
-            "10.0.0.1",
-            token);
+            FreeAddressRow(poolHtml, subnet.Id, "10.0.0.31"));
 
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
         var location = Uri.UnescapeDataString(response.Headers.Location!.OriginalString);
         Assert.Contains($"Query.SubnetId={subnet.Id}", location, StringComparison.Ordinal);
-        Assert.Contains("Query.Search=10.0.0.1", location, StringComparison.Ordinal);
+        Assert.Contains("Query.Search=10.0.0.&", location, StringComparison.Ordinal);
+        Assert.Contains("Query.Status=Unknown", location, StringComparison.Ordinal);
+        Assert.Contains("Query.IncludeArchived=True", location, StringComparison.Ordinal);
         Assert.Contains("Query.PoolMode=True", location, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Query.Skip=0", location, StringComparison.Ordinal);
+        Assert.Contains("Query.Skip=25", location, StringComparison.Ordinal);
         Assert.Contains("Query.Take=25", location, StringComparison.Ordinal);
+        Assert.EndsWith($"#address-{subnet.Id}-10.0.0.31", location, StringComparison.Ordinal);
 
         var html = WebUtility.HtmlDecode(await client.GetStringAsync(response.Headers.Location));
-        var row = FreeAddressRow(html, subnet.Id, "10.0.0.1");
+        var row = FreeAddressRow(html, subnet.Id, "10.0.0.31");
+        Assert.Contains($"id=\"address-{subnet.Id}-10.0.0.31\"", row, StringComparison.Ordinal);
+        Assert.DoesNotContain("data-free-ip-ping-feedback", FreeAddressRow(html, subnet.Id, "10.0.0.30"), StringComparison.Ordinal);
         Assert.Contains("data-free-ip-ping-feedback", row, StringComparison.Ordinal);
         Assert.Contains("Ping 可达 · 12 ms", row, StringComparison.Ordinal);
         Assert.DoesNotContain("标记为存活", row, StringComparison.Ordinal);
@@ -1174,7 +1191,7 @@ public sealed class AssetAndPingTests
         var audit = Assert.Single(await factory.GetAuditLogsAsync());
         Assert.Equal("PingUnregisteredAddress", audit.Action);
         Assert.Equal("SubnetAddress", audit.ObjectType);
-        Assert.Equal("10.0.0.1", audit.ObjectId);
+        Assert.Equal("10.0.0.31", audit.ObjectId);
         Assert.Equal("Success", audit.Result);
     }
 
@@ -1732,6 +1749,25 @@ public sealed class AssetAndPingTests
             RegexOptions.Singleline);
         Assert.True(match.Success, $"Could not find {element}[{attribute}].");
         return match.Value;
+    }
+
+    private static Task<HttpResponseMessage> PostRenderedRowFormAsync(
+        HttpClient client,
+        string row,
+        string? endpoint = null)
+    {
+        var form = HtmlRegion(row, "form", "method=\"post\"");
+        var action = Regex.Match(form, "action=\"([^\"]+)\"");
+        Assert.True(action.Success, "The row must contain a POST action.");
+        var values = Regex.Matches(
+            form,
+            "<input[^>]*name=\"([^\"]+)\"[^>]*value=\"([^\"]*)\"")
+            .Select(match => new KeyValuePair<string, string>(
+                WebUtility.HtmlDecode(match.Groups[1].Value),
+                WebUtility.HtmlDecode(match.Groups[2].Value)));
+        return client.PostAsync(
+            endpoint ?? WebUtility.HtmlDecode(action.Groups[1].Value),
+            new FormUrlEncodedContent(values));
     }
 
     private static Task<HttpResponseMessage> PostPingAsync(
