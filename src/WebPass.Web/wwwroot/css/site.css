@@ -484,6 +484,37 @@ label {
     flex: 0 1 240px;
 }
 
+.command-bar[data-export-filters] > * {
+    min-width: 0;
+    max-width: 100%;
+}
+
+.command-bar[data-export-filters] > .export-format-field {
+    flex-basis: max-content;
+}
+
+[data-export-filters] .export-format-label {
+    display: block;
+    margin-block-end: 5px;
+    color: var(--color-ink);
+    font-size: .8125rem;
+    font-weight: 600;
+}
+
+[data-export-filters] .export-format-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 8px;
+    overflow-x: auto;
+}
+
+[data-export-filters] .export-format-actions button {
+    flex: 0 0 auto;
+    min-height: 38px;
+    white-space: nowrap;
+}
+
 .servers-page {
     padding-block-end: calc(88px + env(safe-area-inset-bottom, 0px));
 }

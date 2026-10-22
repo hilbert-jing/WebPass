@@ -155,7 +155,7 @@
             @if (item.IsRegistered && item.AssetId is { } id)
             {
                 <div class="table-actions">
-                    @if (Model.CanEdit)
+                    @if (Model.CanEdit && !item.IsArchived)
                     {
                         <a asp-page="/Servers/Edit" asp-route-id="@id">编辑</a>
                     }

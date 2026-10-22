@@ -49,6 +49,13 @@ public sealed class ExportPageTests
         Assert.Contains("停用", html, StringComparison.Ordinal);
         Assert.Contains("下载 CSV", html, StringComparison.Ordinal);
         Assert.Contains("下载 XLSX", html, StringComparison.Ordinal);
+        var formatActions = Regex.Match(
+            html,
+            "<div[^>]*role=\"group\"[^>]*aria-labelledby=\"export-format-label\"[^>]*>.*?</div>",
+            RegexOptions.Singleline).Value;
+        Assert.Contains("tabindex=\"0\"", formatActions, StringComparison.Ordinal);
+        Assert.Contains("下载 CSV", formatActions, StringComparison.Ordinal);
+        Assert.Contains("下载 XLSX", formatActions, StringComparison.Ordinal);
     }
 
     [Fact]

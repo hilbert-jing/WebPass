@@ -387,17 +387,26 @@ public sealed class VisualSystemPageTests
         Assert.DoesNotContain("<button", pageSize, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task Server_primary_actions_promote_password_reveal()
+    [Theory]
+    [InlineData(true, false, true)]
+    [InlineData(false, false, false)]
+    [InlineData(true, true, false)]
+    [InlineData(false, true, false)]
+    public async Task Server_primary_actions_show_edit_only_for_active_assets_with_permission(
+        bool canEdit,
+        bool isArchived,
+        bool showsEdit)
     {
         using var factory = new PresentationFactory();
-        factory.InitializeUser(
-            false,
+        var permissions = new List<string>
+        {
             PermissionCode.AssetView,
-            PermissionCode.AssetEdit,
             PermissionCode.PingExecute,
             PermissionCode.SecretReveal,
-            PermissionCode.AssetArchive);
+            PermissionCode.AssetArchive,
+        };
+        if (canEdit) permissions.Add(PermissionCode.AssetEdit);
+        factory.InitializeUser(false, permissions.ToArray());
         var subnetId = Guid.NewGuid();
         var assetId = Guid.NewGuid();
         factory.Seed(db =>
@@ -422,11 +431,13 @@ public sealed class VisualSystemPageTests
                 AliveStatus = AliveStatus.Alive,
                 ComputerName = "web-09",
                 SystemName = "WebPass",
+                IsArchived = isArchived,
             });
         });
         using var client = factory.CreateAuthenticatedClient();
 
-        var html = await client.GetStringAsync("/servers");
+        var html = WebUtility.HtmlDecode(await client.GetStringAsync(
+            "/servers?Query.IncludeArchived=true"));
         var row = Regex.Match(
             html,
             $"<tr[^>]*data-asset-id=\"{assetId}\"[^>]*>.*?</tr>",
@@ -441,12 +452,20 @@ public sealed class VisualSystemPageTests
             RegexOptions.Singleline).Value;
 
         Assert.NotEmpty(row);
+        Assert.Equal(showsEdit, edit >= 0);
+        Assert.Equal(isArchived, row.Contains("已归档 · ", StringComparison.Ordinal));
         Assert.True(
-            edit >= 0 && edit < ping && ping < reveal && reveal < more,
-            "Expected Edit, Ping, Reveal, and More in primary-action order.");
+            ping >= 0 && ping < reveal && reveal < more && (!showsEdit || edit < ping),
+            "Expected eligible Edit, Ping, Reveal, and More in primary-action order.");
         Assert.NotEmpty(moreActions);
         Assert.Contains("归档服务器", moreActions, StringComparison.Ordinal);
         Assert.DoesNotContain("查看密码", moreActions, StringComparison.Ordinal);
+
+        if (canEdit && isArchived)
+        {
+            using var editResponse = await client.GetAsync($"/servers/{assetId}/edit");
+            Assert.Equal(HttpStatusCode.NotFound, editResponse.StatusCode);
+        }
     }
 
     [Fact]
