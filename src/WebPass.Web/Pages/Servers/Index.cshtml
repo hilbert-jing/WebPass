@@ -12,6 +12,7 @@
          !string.IsNullOrWhiteSpace(Model.Input.BusinessIp));
 }
 
+<div class="servers-page">
 <header class="page-header">
     <div>
         <h1>服务器资产</h1>
@@ -42,8 +43,8 @@
     </p>
 }
 
-<form method="get" class="command-bar" aria-label="服务器筛选">
-    <div>
+<form method="get" class="command-bar" data-server-filters aria-label="服务器筛选">
+    <div class="server-filter-search">
         <label asp-for="Query.Search">搜索</label>
         <input asp-for="Query.Search" placeholder="IP、位置、计算机或系统" />
     </div>
@@ -67,20 +68,19 @@
             }
         </select>
     </div>
-    <div>
-        <input asp-for="Query.IncludeArchived" />
-        <label asp-for="Query.IncludeArchived">包含已归档</label>
-    </div>
-    <div>
-        <input asp-for="Query.PoolMode" />
-        <label asp-for="Query.PoolMode">显示完整地址池</label>
-    </div>
-    <div>
-        <label asp-for="Query.Take">每页显示数量</label>
-        <input asp-for="Query.Take" type="number" min="1" max="500" />
+    <div class="server-filter-options">
+        <label class="server-filter-check" asp-for="Query.IncludeArchived">
+            <input asp-for="Query.IncludeArchived" />
+            包含已归档
+        </label>
+        <label class="server-filter-check" asp-for="Query.PoolMode">
+            <input asp-for="Query.PoolMode" />
+            显示完整地址池
+        </label>
     </div>
     <input type="hidden" name="Query.Skip" value="0" />
-    <button type="submit">应用筛选</button>
+    <input type="hidden" name="Query.Take" value="@Model.Query.Take" />
+    <button type="submit" class="server-filter-submit">应用筛选</button>
 </form>
 
 @if (Model.SelectedSubnet is { } selectedSubnet)
@@ -286,40 +286,58 @@
     </tbody>
 </table>
 
-<p>显示 @Model.Results.Items.Count 条，共 @Model.Results.TotalCount 条。</p>
-<nav aria-label="服务器分页">
-    @if (Model.Query.Skip > 0)
-    {
-        <form method="get">
-            <input type="hidden" asp-for="Query.Search" />
-            <input type="hidden" asp-for="Query.SubnetId" />
-            <input type="hidden" asp-for="Query.Status" />
-            <input type="hidden" asp-for="Query.IncludeArchived" />
-            <input type="hidden" asp-for="Query.PoolMode" />
-            <input type="hidden" asp-for="Query.Take" />
+<nav class="server-pagination" aria-label="服务器分页" tabindex="0">
+    <div class="server-pagination-inner">
+        <p class="server-page-summary">
+            显示 @Model.Results.Items.Count 条，共 @Model.Results.TotalCount 条。
+            <span>第 @Model.CurrentPage / @Model.TotalPages 页</span>
+        </p>
+        <form method="get" data-page-previous>
+            @foreach (var routeValue in listRouteValues.Where(x => x.Key != "Query.Skip"))
+            {
+                <input type="hidden" name="@routeValue.Key" value="@(routeValue.Value?.ToString())" />
+            }
             <button type="submit"
                     name="Query.Skip"
-                    value="@Math.Max(0, Model.Query.Skip - Model.Query.Take)">
+                    value="@Math.Max(0, Model.Query.Skip - Model.Query.Take)"
+                    disabled="@(!Model.HasPreviousPage)">
                 上一页
             </button>
         </form>
-    }
-    @if ((long)Model.Query.Skip + Model.Results.Items.Count < Model.Results.TotalCount)
-    {
-        <form method="get">
-            <input type="hidden" asp-for="Query.Search" />
-            <input type="hidden" asp-for="Query.SubnetId" />
-            <input type="hidden" asp-for="Query.Status" />
-            <input type="hidden" asp-for="Query.IncludeArchived" />
-            <input type="hidden" asp-for="Query.PoolMode" />
-            <input type="hidden" asp-for="Query.Take" />
+        <form method="get" data-page-next>
+            @foreach (var routeValue in listRouteValues.Where(x => x.Key != "Query.Skip"))
+            {
+                <input type="hidden" name="@routeValue.Key" value="@(routeValue.Value?.ToString())" />
+            }
             <button type="submit"
                     name="Query.Skip"
-                    value="@(Model.Query.Skip + Model.Query.Take)">
+                    value="@Model.NextSkip"
+                    disabled="@(!Model.HasNextPage)">
                 下一页
             </button>
         </form>
-    }
+        <form method="get" data-page-jump aria-label="服务器跳页">
+            @foreach (var routeValue in listRouteValues)
+            {
+                <input type="hidden" name="@routeValue.Key" value="@(routeValue.Value?.ToString())" />
+            }
+            <label asp-for="PageNumber">页码</label>
+            <input asp-for="PageNumber" type="number" min="1" max="@Model.MaxPageNumber" step="1"
+                   required disabled="@(Model.Results.TotalCount == 0)" aria-describedby="server-page-error" />
+            <button type="submit" disabled="@(Model.Results.TotalCount == 0)">跳转</button>
+            <span asp-validation-for="PageNumber" id="server-page-error" role="status"></span>
+        </form>
+        <form method="get" data-page-size aria-label="服务器每页数量">
+            @foreach (var routeValue in listRouteValues.Where(x => x.Key is not ("Query.Skip" or "Query.Take")))
+            {
+                <input type="hidden" name="@routeValue.Key" value="@(routeValue.Value?.ToString())" />
+            }
+            <input type="hidden" name="Query.Skip" value="0" />
+            <label asp-for="Query.Take">每页显示数量</label>
+            <input asp-for="Query.Take" type="number" min="1" max="500" step="1" required
+                   title="输入后按回车或移开焦点应用" />
+        </form>
+    </div>
 </nav>
 
 @if (Model.CanCreate)
@@ -391,3 +409,5 @@
 {
     <script src="/js/secret-reveal.js"></script>
 }
+<script src="/js/server-pagination.js" defer></script>
+</div>

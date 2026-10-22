@@ -33,9 +33,19 @@ public sealed class IndexModel(
     public bool CanReveal { get; private set; }
     public ServerPingFeedback? PingFeedback { get; private set; }
     public UnregisteredPingFeedback? FreeIpPingFeedback { get; private set; }
+    public long CurrentPage => (long)Query.Skip / Query.Take + 1;
+    public long TotalPages => Results.TotalCount == 0 ? 1 : (Results.TotalCount - 1) / Query.Take + 1;
+    public long MaxPageNumber => Math.Min(TotalPages, (long)int.MaxValue / Query.Take + 1);
+    public bool HasPreviousPage => Results.TotalCount > 0 && Query.Skip > 0;
+    public bool HasNextPage => (long)Query.Skip + Query.Take <= int.MaxValue &&
+        (long)Query.Skip + Results.Items.Count < Results.TotalCount;
+    public int NextSkip => (int)Math.Min(int.MaxValue, (long)Query.Skip + Query.Take);
 
     [BindProperty(SupportsGet = true)]
     public ServerListQuery Query { get; set; } = new();
+
+    [BindProperty(SupportsGet = true)]
+    public long? PageNumber { get; set; }
 
     [BindProperty(SupportsGet = true)]
     public ServerForm Input { get; set; } = new();
@@ -45,7 +55,32 @@ public sealed class IndexModel(
         ClearRegistrationValidationState();
         PingFeedback = PingCommandWorkflow.TakeFeedback(TempData);
         FreeIpPingFeedback = PingCommandWorkflow.TakeUnregisteredFeedback(TempData);
+        NormalizeQuery();
+        var jumpRequested = Request.Query.ContainsKey(nameof(PageNumber));
+        var validJump = jumpRequested && PageNumber is not null &&
+            (!ModelState.TryGetValue(nameof(PageNumber), out var pageState) || pageState.Errors.Count == 0);
+        if (validJump)
+        {
+            var page = Math.Clamp(PageNumber!.Value, 1, (long)int.MaxValue / Query.Take + 1);
+            Query = Query with { Skip = (int)((page - 1) * Query.Take) };
+        }
+        else if (jumpRequested)
+        {
+            ModelState.Remove(nameof(PageNumber));
+            ModelState.AddModelError(nameof(PageNumber), "请输入有效的整数页码。");
+        }
+
         await LoadAsync(ct);
+        if (validJump)
+        {
+            if (CurrentPage > MaxPageNumber)
+            {
+                Query = Query with { Skip = (int)((MaxPageNumber - 1) * Query.Take) };
+                Results = await assetService.ListAsync(Query, ct);
+            }
+            PageNumber = CurrentPage;
+            ModelState.Remove(nameof(PageNumber));
+        }
     }
 
     public async Task<IActionResult> OnPostCreateAsync(CancellationToken ct)
@@ -202,6 +237,7 @@ public sealed class IndexModel(
         CanPing = await AllowedAsync(PermissionCode.PingExecute, ct);
         CanMarkAlive = await AllowedAsync(PermissionCode.StatusMarkAlive, ct);
         CanReveal = await AllowedAsync(PermissionCode.SecretReveal, ct);
+        PageNumber = CurrentPage;
     }
 
     private void NormalizeQuery()

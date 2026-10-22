@@ -1005,8 +1005,9 @@ public sealed class AssetAndPingTests
 
         var response = await client.GetAsync($"/servers?Query.Take={requested}");
         var html = await response.Content.ReadAsStringAsync();
+        var sizeForm = HtmlRegion(html, "form", "data-page-size");
         var takeInput = Regex.Match(
-            html,
+            sizeForm,
             "<input[^>]*name=\"Query.Take\"[^>]*>",
             RegexOptions.Singleline).Value;
 
@@ -1034,6 +1035,92 @@ public sealed class AssetAndPingTests
             "name=\"Query.Skip\" value=\"0\"",
             filter,
             StringComparison.Ordinal);
+        Assert.Equal("25", FormValue(filter, "Query.Take"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Pagination_forms_keep_filters_when_turning_jumping_and_resizing_pages(bool poolMode)
+    {
+        using var factory = new ServerPageFactory(NewUser(), PermissionCode.AssetView);
+        factory.InitializeData();
+        await factory.AddSubnetAsync();
+        var subnet = await factory.GetOnlySubnetAsync();
+        for (var host = 1; host <= 6; host++)
+            await factory.AddAssetAsync($"10.0.0.{host}", $"Rack {host}", [(byte)host]);
+        using var client = factory.CreateAuthenticatedClient();
+        var html = await client.GetStringAsync(
+            $"/servers?Query.Search=Rack&Query.SubnetId={subnet.Id}&Query.Status=Unknown&Query.IncludeArchived=true&Query.PoolMode={poolMode}&Query.Skip=2&Query.Take=2");
+
+        foreach (var (formName, changes, expectedSkip, expectedTake, expectedFirstIp) in new[]
+        {
+            ("data-page-previous", new Dictionary<string, string>(), "0", "2", "10.0.0.1"),
+            ("data-page-next", new Dictionary<string, string>(), "4", "2", "10.0.0.5"),
+            ("data-page-jump", new Dictionary<string, string> { ["PageNumber"] = "3" }, "4", "2", "10.0.0.5"),
+            ("data-page-size", new Dictionary<string, string> { ["Query.Take"] = "3" }, "0", "3", "10.0.0.1"),
+        })
+        {
+            var form = HtmlRegion(html, "form", formName);
+            using var response = await FollowPaginationFormAsync(client, form, changes);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var result = WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync());
+            var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(response.RequestMessage!.RequestUri!.Query);
+            Assert.Equal("Rack", query["Query.Search"]);
+            Assert.Equal(subnet.Id.ToString(), query["Query.SubnetId"]);
+            Assert.Equal("Unknown", query["Query.Status"]);
+            Assert.Equal("True", query["Query.IncludeArchived"]);
+            Assert.Equal(poolMode.ToString(), query["Query.PoolMode"]);
+            var jump = HtmlRegion(result, "form", "data-page-jump");
+            Assert.Equal(expectedSkip, FormValue(jump, "Query.Skip"));
+            Assert.Equal(expectedTake, FormValue(jump, "Query.Take"));
+            var rows = Regex.Matches(result, "<tr[^>]*data-business-ip=\"([^\"]+)\"[^>]*>");
+            Assert.Equal(expectedFirstIp, rows[0].Groups[1].Value);
+            Assert.Equal(int.Parse(expectedTake), rows.Count);
+            Assert.Contains("共 6 条", result, StringComparison.Ordinal);
+        }
+    }
+
+    [Theory]
+    [InlineData("2", "100", false)]
+    [InlineData("0", "0", false)]
+    [InlineData("999", "200", false)]
+    [InlineData("9223372036854775807", "200", false)]
+    [InlineData("not-a-page", "100", true)]
+    [InlineData("", "100", true)]
+    public async Task Page_jump_handles_boundaries_without_losing_the_current_list_on_invalid_input(
+        string pageNumber,
+        string expectedSkip,
+        bool expectsError)
+    {
+        using var factory = new ServerPageFactory(NewUser(), PermissionCode.AssetView);
+        factory.InitializeData();
+        await factory.AddSubnetAsync();
+        using var client = factory.CreateAuthenticatedClient();
+        using var response = await client.GetAsync(
+            $"/servers?Query.PoolMode=true&Query.Skip=100&Query.Take=100&PageNumber={Uri.EscapeDataString(pageNumber)}");
+        var html = WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(expectedSkip, FormValue(HtmlRegion(html, "form", "data-page-jump"), "Query.Skip"));
+        Assert.Equal(expectsError, html.Contains("请输入有效的整数页码。", StringComparison.Ordinal));
+        var rows = Regex.Matches(html, "<tr[^>]*data-business-ip=\"([^\"]+)\"[^>]*>");
+        Assert.Equal($"10.0.0.{int.Parse(expectedSkip) + 1}", rows[0].Groups[1].Value);
+    }
+
+    [Fact]
+    public async Task Last_representable_page_disables_next_instead_of_returning_overlapping_rows()
+    {
+        using var factory = new ServerPageFactory(NewUser(), PermissionCode.AssetView);
+        factory.InitializeData();
+        using (var scope = factory.Services.CreateScope())
+            await AddEnabledSubnetAsync(scope.ServiceProvider.GetRequiredService<WebPassDbContext>(), "0.0.0.0/0");
+        using var client = factory.CreateAuthenticatedClient();
+        var html = await client.GetStringAsync("/servers?Query.PoolMode=true&Query.Take=500&PageNumber=4294968");
+
+        Assert.Equal("2147483500", FormValue(HtmlRegion(html, "form", "data-page-jump"), "Query.Skip"));
+        Assert.Matches("<button[^>]*disabled", HtmlRegion(html, "form", "data-page-next"));
+        Assert.DoesNotMatch("<button[^>]*disabled", HtmlRegion(html, "form", "data-page-previous"));
     }
 
     [Theory]
@@ -1749,6 +1836,24 @@ public sealed class AssetAndPingTests
             RegexOptions.Singleline);
         Assert.True(match.Success, $"Could not find {element}[{attribute}].");
         return match.Value;
+    }
+
+    private static Task<HttpResponseMessage> FollowPaginationFormAsync(
+        HttpClient client,
+        string form,
+        IReadOnlyDictionary<string, string> changes)
+    {
+        var values = Regex.Matches(form, "<input[^>]*name=\"([^\"]+)\"[^>]*value=\"([^\"]*)\"")
+            .ToDictionary(match => WebUtility.HtmlDecode(match.Groups[1].Value),
+                match => WebUtility.HtmlDecode(match.Groups[2].Value));
+        var button = Regex.Match(form, "<button[^>]*name=\"([^\"]+)\"[^>]*value=\"([^\"]*)\"");
+        if (button.Success)
+            values[button.Groups[1].Value] = WebUtility.HtmlDecode(button.Groups[2].Value);
+        foreach (var (key, value) in changes)
+            values[key] = value;
+        var query = string.Join("&", values.Select(pair =>
+            $"{Uri.EscapeDataString(pair.Key)}={Uri.EscapeDataString(pair.Value)}"));
+        return client.GetAsync($"/servers?{query}");
     }
 
     private static Task<HttpResponseMessage> PostRenderedRowFormAsync(

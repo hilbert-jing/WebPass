@@ -365,6 +365,29 @@ public sealed class VisualSystemPageTests
     }
 
     [Fact]
+    public async Task Empty_inventory_keeps_paging_controls_visible_and_disables_unavailable_navigation()
+    {
+        using var factory = new PresentationFactory();
+        factory.InitializeUser(false, PermissionCode.AssetView);
+        using var client = factory.CreateAuthenticatedClient();
+        var html = WebUtility.HtmlDecode(await client.GetStringAsync("/servers"));
+        var pagination = Regex.Match(html, "<nav[^>]*aria-label=\"服务器分页\"[^>]*>.*?</nav>", RegexOptions.Singleline).Value;
+
+        Assert.Contains("共 0 条", pagination, StringComparison.Ordinal);
+        foreach (var formName in new[] { "data-page-previous", "data-page-next", "data-page-jump" })
+        {
+            var form = Regex.Match(pagination, $"<form[^>]*{formName}[^>]*>.*?</form>", RegexOptions.Singleline).Value;
+            Assert.NotEmpty(form);
+            Assert.Matches("<button[^>]*disabled", form);
+        }
+        var filter = Regex.Match(html, "<form[^>]*aria-label=\"服务器筛选\"[^>]*>.*?</form>", RegexOptions.Singleline).Value;
+        Assert.DoesNotContain("type=\"number\"", filter, StringComparison.Ordinal);
+        Assert.Contains("data-page-size", pagination, StringComparison.Ordinal);
+        var pageSize = Regex.Match(pagination, "<form[^>]*data-page-size[^>]*>.*?</form>", RegexOptions.Singleline).Value;
+        Assert.DoesNotContain("<button", pageSize, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Server_primary_actions_promote_password_reveal()
     {
         using var factory = new PresentationFactory();
